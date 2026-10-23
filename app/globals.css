@@ -1,0 +1,363 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------------ */
+/* Tokens                                                                   */
+/* ------------------------------------------------------------------------ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f4fb;
+  --surface: #ffffff;
+  --surface-2: #efecf7;
+  --fg: #1c1830;
+  --muted: #6b6585;
+  --border: #e2ddef;
+  --success: #15803d;
+  --danger: #dc2626;
+  --gold: #d97706;
+
+  /* accent par défaut (violet) ; surchargé par .themed */
+  --accent-l: #7c3aed;
+  --accent-d: #a78bfa;
+  --accent-soft-l: #ede9fe;
+  --accent-soft-d: #2e1f5e;
+  --accent: var(--accent-l);
+  --accent-soft: var(--accent-soft-l);
+  --accent-fg: #ffffff;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #110f1c;
+    --surface: #1b1829;
+    --surface-2: #252136;
+    --fg: #f1eefb;
+    --muted: #a49dbf;
+    --border: #322d47;
+    --success: #4ade80;
+    --danger: #f87171;
+    --gold: #fbbf24;
+    --accent: var(--accent-d);
+    --accent-soft: var(--accent-soft-d);
+    --accent-fg: #140f24;
+  }
+}
+
+/* Les variables --accent-* d'un thème de bingo sont posées en style inline ;
+   .themed recalcule l'accent effectif pour ce sous-arbre. */
+.themed {
+  --accent: var(--accent-l);
+  --accent-soft: var(--accent-soft-l);
+}
+@media (prefers-color-scheme: dark) {
+  .themed {
+    --accent: var(--accent-d);
+    --accent-soft: var(--accent-soft-d);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-gold: var(--gold);
+  --font-sans: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Base                                                                     */
+/* ------------------------------------------------------------------------ */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* ≥ 16px : iOS ne zoome pas au focus */
+input,
+textarea,
+select {
+  font-size: max(16px, 1rem);
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Composants                                                               */
+/* ------------------------------------------------------------------------ */
+
+@layer components {
+  .page {
+    width: 100%;
+    max-width: 40rem;
+    margin-inline: auto;
+    padding-left: max(var(--gutter), var(--safe-left));
+    padding-right: max(var(--gutter), var(--safe-right));
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 48px;
+    padding: 0.75rem 1.25rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    font-size: 1rem;
+    line-height: 1.2;
+    transition:
+      transform 120ms ease,
+      background-color 150ms ease,
+      opacity 150ms ease;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+  .btn-secondary {
+    background: var(--accent-soft);
+    color: var(--fg);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+  }
+  .btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--border);
+  }
+  .btn-sm {
+    min-height: 44px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.95rem;
+  }
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+  .icon-btn:active {
+    background: var(--surface-2);
+  }
+
+  .input {
+    width: 100%;
+    min-height: 48px;
+    padding: 0.75rem 1rem;
+    border-radius: 0.875rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg);
+  }
+  .input::placeholder {
+    color: var(--muted);
+    opacity: 0.8;
+  }
+  .input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+    border-color: transparent;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+  }
+
+  .label {
+    display: block;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    background: var(--accent-soft);
+    color: var(--fg);
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Safe areas                                                               */
+/* ------------------------------------------------------------------------ */
+
+.pt-safe {
+  padding-top: var(--safe-top);
+}
+.pb-safe {
+  padding-bottom: max(var(--safe-bottom), 12px);
+}
+.bottom-safe {
+  bottom: var(--safe-bottom);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Grille                                                                   */
+/* ------------------------------------------------------------------------ */
+
+.bingo-cell {
+  container-type: size;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.bingo-cell-text {
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+@keyframes stamp {
+  0% {
+    transform: scale(0.6) rotate(-12deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(-6deg);
+    opacity: 1;
+  }
+}
+.animate-stamp {
+  animation: stamp 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-pop {
+  animation: pop 180ms ease-out;
+}
+
+@keyframes win-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 55%, transparent);
+  }
+}
+.animate-win {
+  animation: win-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-slide-up {
+  animation: slide-up 220ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  animation: fade-in 180ms ease-out both;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-toast {
+  animation: toast-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

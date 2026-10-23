@@ -1,0 +1,25 @@
+# Configuration minimale de la CLI Supabase (développement local / db push).
+# Les réglages du projet hébergé se font dans le dashboard Supabase (voir README).
+project_id = "bingobuzz"
+
+[api]
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322
+major_version = 17
+
+[realtime]
+enabled = true
+
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+enable_anonymous_sign_ins = true
+enable_manual_linking = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = false
+enable_confirmations = false
