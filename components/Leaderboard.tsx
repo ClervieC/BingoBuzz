@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { cellsToBingo, countChecked, hasBingo, sizeFromLength } from "@/lib/bingo";
 import type { GamePlayer } from "@/types/bingo";
 import { useT } from "./I18nProvider";
@@ -47,12 +47,15 @@ export function Leaderboard({
   hostId,
   online,
   onSelect,
+  renderExtra,
 }: {
   players: GamePlayer[];
   userId: string | null;
   hostId: string | null;
   online: ReadonlySet<string>;
   onSelect: (player: GamePlayer) => void;
+  /** contenu sous la ligne d'un joueur (réactions sur son bingo) */
+  renderExtra?: (player: GamePlayer, bingo: boolean) => ReactNode;
 }) {
   const t = useT();
   const ranked = useMemo(() => rankPlayers(players), [players]);
@@ -114,6 +117,7 @@ export function Leaderboard({
                 </span>
               </span>
             </button>
+            {renderExtra?.(player, bingo)}
           </li>
         );
       })}

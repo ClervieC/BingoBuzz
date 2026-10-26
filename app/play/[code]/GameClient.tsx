@@ -6,12 +6,14 @@ import { BingoGrid } from "@/components/BingoGrid";
 import { BottomSheet } from "@/components/BottomSheet";
 import { ClaimsPanel } from "@/components/ClaimsPanel";
 import { HostPanel } from "@/components/HostPanel";
-import { useT } from "@/components/I18nProvider";
+import { useI18n, useT } from "@/components/I18nProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { JoinForm } from "@/components/JoinForm";
 import { ProofGallery } from "@/components/ProofGallery";
 import { ProgressRing } from "@/components/ProgressRing";
 import { ProposeSheet } from "@/components/ProposeSheet";
+import { PushPrompt } from "@/components/PushPrompt";
+import { ReactionBar } from "@/components/ReactionBar";
 import { Leaderboard, rankPlayers } from "@/components/Leaderboard";
 import { SharePanel } from "@/components/SharePanel";
 import { useToast } from "@/components/Toast";
@@ -23,7 +25,16 @@ import { haptics } from "@/lib/haptics";
 import type { MessageKey } from "@/lib/i18n";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
 import { THEME_COLORS, themeStyle } from "@/lib/themes";
-import type { GameMode, GamePlayer, PublicGame } from "@/types/bingo";
+import type { GameClaim, GameMode, GamePlayer, PublicGame } from "@/types/bingo";
+
+/** « dans 3 jours », « in 5 hours »… */
+function relativeTime(iso: string, locale: string) {
+  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (Math.abs(seconds) < 3600) return rtf.format(Math.round(seconds / 60), "minute");
+  if (Math.abs(seconds) < 86400) return rtf.format(Math.round(seconds / 3600), "hour");
+  return rtf.format(Math.round(seconds / 86400), "day");
+}
 
 type Tab = "grid" | "ranking" | "photos" | "host" | "invite";
 
@@ -48,6 +59,7 @@ const MODE_HINT: Record<GameMode, MessageKey> = {
 
 export function GameClient({ publicGame }: { publicGame: PublicGame }) {
   const t = useT();
+  const { locale } = useI18n();
   const toast = useToast();
   const g = useGame(publicGame);
   const [tab, setTab] = useState<Tab | null>(null);
@@ -73,7 +85,9 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     list.push("invite");
     return list;
   }, [g.me, g.isHost, g.game?.mode, publicGame.mode]);
-  const activeTab: Tab = tab && tabs.includes(tab) ? tab : g.me ? "grid" : g.isHost ? "host" : tabs[0];
+  // partie terminée : on arrive sur le classement final
+  const activeTab: Tab =
+    tab && tabs.includes(tab) ? tab : finished ? "ranking" : g.me ? "grid" : g.isHost ? "host" : tabs[0];
 
   // texte d'une phrase (bingo chargé, sinon grilles des joueurs)
   const phraseText = useCallback(
@@ -175,6 +189,20 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     [mode, toggle, me, g.claims, g.userId, cancelClaim],
   );
 
+  const { reactions, toggleReaction, userId } = g;
+  const claimReactions = useCallback(
+    (claim: GameClaim) => (
+      <ReactionBar
+        reactions={reactions}
+        targetType="claim"
+        targetId={claim.id}
+        userId={userId}
+        onToggle={(emoji) => void toggleReaction("claim", claim.id, emoji)}
+      />
+    ),
+    [reactions, toggleReaction, userId],
+  );
+
   // ------------------------------------------------------------------------
 
   const header = (
@@ -216,6 +244,14 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         >
           {publicGame.code}
         </button>
+        {g.game && !finished && g.game.auto_end !== "manual" && (
+          <span className="rounded-full bg-white/15 px-2.5 py-1">🏁 {t(`game.end.${g.game.auto_end}`)}</span>
+        )}
+        {g.game?.ends_at && !finished && (
+          <span className="rounded-full bg-white/15 px-2.5 py-1">
+            ⏱ {t("game.end.in", { time: relativeTime(g.game.ends_at, locale) })}
+          </span>
+        )}
         {g.phase === "ready" && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1">
             <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
@@ -365,8 +401,11 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
                 phraseText={phraseText}
                 onResolve={(id, accept) => void resolveClaim(id, accept)}
                 onCancel={(claim) => void cancelClaim(claim)}
+                renderReactions={claimReactions}
               />
             )}
+
+            <PushPrompt />
 
             <p className="mx-auto w-fit rounded-full bg-surface-2 px-3 py-1.5 text-center text-xs font-semibold text-muted">
               💡 {t(MODE_HINT[mode])}
@@ -396,6 +435,18 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
               hostId={g.game?.host_id ?? null}
               online={g.online}
               onSelect={(p) => setViewedId(p.id)}
+              renderExtra={(player, bingo) =>
+                bingo ? (
+                  <ReactionBar
+                    className="mt-1.5 pl-3"
+                    reactions={reactions}
+                    targetType="bingo"
+                    targetId={player.id}
+                    userId={userId}
+                    onToggle={(emoji) => void toggleReaction("bingo", player.id, emoji)}
+                  />
+                ) : null
+              }
             />
           </section>
         )}
@@ -411,6 +462,7 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
                 phraseText={phraseText}
                 onResolve={(id, accept) => void resolveClaim(id, accept)}
                 onCancel={(claim) => void cancelClaim(claim)}
+                renderReactions={claimReactions}
                 showEmpty
               />
             )}
@@ -433,6 +485,10 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
             {!me && !finished && (
               <section className="card p-5">
                 <h2 className="mb-3 font-extrabold">{t("game.host.alsoPlay")}</h2>
+                {/* le premier joueur verrouille le bingo : l'hôte doit le savoir avant */}
+                {g.board?.owner_id === g.userId && g.players.length === 0 && (
+                  <p className="mb-3 rounded-xl bg-gold/15 p-3 text-sm font-semibold">⚠️ {t("game.host.alsoPlay.warning")}</p>
+                )}
                 <JoinForm onJoin={g.join} submitLabel={t("game.host.alsoPlay")} />
               </section>
             )}
@@ -440,7 +496,12 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         )}
 
         {activeTab === "photos" && (
-          <ProofGallery claims={g.claims} players={g.players} phraseText={phraseText} />
+          <ProofGallery
+            claims={g.claims}
+            players={g.players}
+            phraseText={phraseText}
+            renderReactions={claimReactions}
+          />
         )}
 
         {activeTab === "invite" && (

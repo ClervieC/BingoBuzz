@@ -3,6 +3,10 @@ export type GridSize = 3 | 4 | 5;
 export type GameMode = "free" | "validated" | "peer";
 export type ClaimStatus = "pending" | "confirmed" | "rejected";
 export type GameStatus = "playing" | "finished";
+/** fin automatique choisie par l'hôte */
+export type GameAutoEnd = "manual" | "first_bingo" | "full_card";
+export const REACTION_EMOJIS = ["😂", "🔥", "👏", "😮", "❤️"] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 
 export interface BoardTheme {
   emoji: string;
@@ -57,6 +61,8 @@ export interface Game {
   status: GameStatus;
   created_at: string;
   ended_at: string | null;
+  auto_end: GameAutoEnd;
+  ends_at: string | null;
 }
 
 export interface GamePlayer {
@@ -92,6 +98,16 @@ export interface GameClaim {
   resolved_at: string | null;
   /** preuve photo facultative : chemin dans le bucket privé « proofs » */
   photo_path: string | null;
+}
+
+export interface GameReaction {
+  id: string;
+  game_id: string;
+  target_type: "bingo" | "claim";
+  target_id: string;
+  user_id: string;
+  emoji: ReactionEmoji;
+  created_at: string;
 }
 
 export interface PublicGame {

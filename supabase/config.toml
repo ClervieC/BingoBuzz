@@ -14,8 +14,8 @@ major_version = 17
 enabled = true
 
 [auth]
-site_url = "http://localhost:3000"
-additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+site_url = "https://bingobuzz.vercel.app"
+additional_redirect_urls = ["https://bingobuzz.vercel.app/auth/callback", "http://localhost:3000/auth/callback"]
 # connexion obligatoire : pas de compte invité
 enable_anonymous_sign_ins = false
 enable_manual_linking = false

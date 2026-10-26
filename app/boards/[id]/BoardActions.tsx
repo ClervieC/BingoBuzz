@@ -10,7 +10,11 @@ import { useToast } from "@/components/Toast";
 import { requireUser } from "@/lib/auth";
 import { errorKey } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { GameMode } from "@/types/bingo";
+import type { GameAutoEnd, GameMode } from "@/types/bingo";
+
+/** Règles de fin proposées à l'hôte : automatique (bingo, carton plein) ou durée. */
+type EndRule = GameAutoEnd | "1d" | "3d" | "7d";
+const END_RULES: EndRule[] = ["manual", "first_bingo", "full_card", "1d", "3d", "7d"];
 
 export function BoardActions({
   boardId,
@@ -31,6 +35,7 @@ export function BoardActions({
   const router = useRouter();
   const [sheet, setSheet] = useState(false);
   const [mode, setMode] = useState<GameMode>("free");
+  const [endRule, setEndRule] = useState<EndRule>("manual");
   const [busy, setBusy] = useState<null | "game" | "duplicate" | "delete">(null);
 
   async function createGame() {
@@ -40,6 +45,8 @@ export function BoardActions({
       const { data, error } = await getSupabaseBrowserClient().rpc("create_game", {
         p_board_id: boardId,
         p_mode: mode,
+        p_auto_end: endRule.endsWith("d") ? "manual" : (endRule as GameAutoEnd),
+        p_duration_days: endRule.endsWith("d") ? Number.parseInt(endRule, 10) : null,
       });
       if (error || !data) throw error ?? new Error("create_game");
       router.push(`/play/${data.code}`);
@@ -185,6 +192,27 @@ export function BoardActions({
             </button>
           ))}
         </div>
+        <h3 className="mt-6 mb-2 font-bold">{t("board.end")}</h3>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("board.end")}>
+          {END_RULES.map((rule) => (
+            <button
+              key={rule}
+              type="button"
+              role="radio"
+              aria-checked={endRule === rule}
+              onClick={() => setEndRule(rule)}
+              className={`min-h-[40px] rounded-full border-2 px-3 text-sm font-bold transition active:scale-95 ${
+                endRule === rule ? "border-accent bg-accent-soft" : "border-border"
+              }`}
+            >
+              {rule.endsWith("d")
+                ? `⏱ ${t("board.end.days", { count: Number.parseInt(rule, 10) })}`
+                : t(`board.end.${rule as GameAutoEnd}`)}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted">{t("board.end.hint")}</p>
+
         <button
           type="button"
           className="btn btn-primary mt-5 w-full"

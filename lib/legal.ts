@@ -11,17 +11,11 @@ export const LEGAL = {
   updatedAt: "2026-10-26",
 
   /** éditeur du service (personne physique ou société) */
-  publisher: "[Nom ou raison sociale de l'éditeur]",
-  publisherAddress: "[Adresse postale]",
+  publisher: "Clervie CAUSER",
+  publisherAddress: "Particulier, coordonnées communiquées à l'hébergeur",
   /** adresse pour exercer ses droits RGPD */
-  contactEmail: "[contact@votre-domaine.fr]",
+  contactEmail: "clervie@bluedays.com",
 
   /** région du projet Supabase (Dashboard → Project Settings → General) */
-  dataRegion: "[Union européenne — ex. Francfort (eu-central-1)]",
+  dataRegion: "West EU (Ireland) eu-west-1",
 } as const;
-
-export const PROCESSORS = [
-  { name: "Supabase Inc.", role: "auth+db", url: "https://supabase.com/privacy" },
-  { name: "Vercel Inc.", role: "hosting", url: "https://vercel.com/legal/privacy-policy" },
-  { name: "Google LLC", role: "google", url: "https://policies.google.com/privacy" },
-] as const;

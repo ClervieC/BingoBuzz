@@ -8,7 +8,12 @@ import { Icon } from "./Icon";
 /**
  * Panneau qui monte du bas de l'écran (mobile) ; centré en modale sur grand écran.
  * Fermeture : bouton, fond, touche Échap, ou glisser vers le bas.
+ * Le focus reste dans le panneau (Tab / Maj+Tab bouclent) puis revient à
+ * l'élément d'origine à la fermeture.
  */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function BottomSheet({
   open,
   onClose,
@@ -34,7 +39,27 @@ export function BottomSheet({
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      const panel = panelRef.current;
+      if (e.key !== "Tab" || !panel) return;
+      const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel || !panel.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !panel.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;

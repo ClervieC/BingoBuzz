@@ -72,7 +72,7 @@ export function BingoGrid({
       <BottomSheet open={detailCell !== null} onClose={() => setDetail(null)} title={t("grid.fullText")}>
         {detailCell && detail !== null && (
           <div className="space-y-5">
-            <p className="text-2xl leading-snug font-bold" lang="fr">
+            <p className="text-2xl leading-snug font-bold">
               {detailCell.text}
             </p>
             {!readOnly && onToggle && !detailCell.free && (

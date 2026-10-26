@@ -4,7 +4,8 @@ import { AppHeader } from "@/components/AppHeader";
 import { BoardTile } from "@/components/BoardTile";
 import { HeaderNav } from "@/components/HeaderNav";
 import { Icon } from "@/components/Icon";
-import { fetchOwnBoards, fetchTemplates } from "@/lib/db";
+import { fetchFinishedGames, fetchOwnBoards, fetchTemplates } from "@/lib/db";
+import { themeStyle } from "@/lib/themes";
 import { getT } from "@/lib/i18n/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getServerUser } from "@/lib/supabase/user";
@@ -17,9 +18,14 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function LibraryPage() {
   const supabase = await getSupabaseServerClient();
-  const [{ t }, user, templates] = await Promise.all([getT(), getServerUser(), fetchTemplates(supabase).catch(() => [])]);
+  const [{ t, locale }, user] = await Promise.all([getT(), getServerUser()]);
   // le proxy garantit une session ; on reste prudent
-  const boards = user ? await fetchOwnBoards(supabase, user.id).catch(() => []) : [];
+  const [templates, boards, history] = await Promise.all([
+    fetchTemplates(supabase, locale).catch(() => []),
+    user ? fetchOwnBoards(supabase, user.id).catch(() => []) : [],
+    user ? fetchFinishedGames(supabase, user.id).catch(() => []) : [],
+  ]);
+  const dateFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
 
   return (
     <>
@@ -54,6 +60,47 @@ export default async function LibraryPage() {
           </section>
         ) : (
           <LibraryGrid boards={boards} />
+        )}
+
+        {history.length > 0 && (
+          <section>
+            <h2 className="text-lg font-extrabold">{t("library.history")}</h2>
+            <p className="mb-3 text-sm text-muted">{t("library.history.hint")}</p>
+            <ul className="stagger space-y-2">
+              {history.map((game) => (
+                <li key={game.code}>
+                  <Link
+                    href={`/play/${game.code}`}
+                    className="card lift flex min-h-[64px] items-center gap-3 p-3 transition active:scale-[0.99]"
+                  >
+                    <span
+                      aria-hidden
+                      className="themed grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-2xl"
+                      style={themeStyle(game.theme)}
+                    >
+                      {game.theme.emoji}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-bold">{game.title}</span>
+                      <span className="block truncate text-sm text-muted">
+                        {game.winners.length > 0
+                          ? t("library.history.winner", { names: game.winners.join(", ") })
+                          : t("library.history.noWinner")}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right text-xs text-muted">
+                      <span className="block">{dateFormat.format(new Date(game.endedAt))}</span>
+                      {game.me && (
+                        <span className="block font-bold text-fg tabular-nums">
+                          {t("library.history.you", { count: game.me.count, total: game.me.total })}
+                        </span>
+                      )}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {templates.length > 0 && (

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { I18nProvider } from "@/components/I18nProvider";
 import { PreferencesProvider } from "@/components/PreferencesProvider";
+import { ServiceWorker } from "@/components/ServiceWorker";
 import { ToastProvider } from "@/components/Toast";
 import { getT } from "@/lib/i18n/server";
 import { THEME_COLOR } from "@/lib/preferences";
@@ -51,6 +52,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <I18nProvider locale={locale}>
           <PreferencesProvider initialTheme={theme}>
             <ToastProvider>{children}</ToastProvider>
+            <ServiceWorker />
           </PreferencesProvider>
         </I18nProvider>
       </body>

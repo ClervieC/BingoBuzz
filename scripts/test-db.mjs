@@ -367,7 +367,8 @@ await expectError(
 // --- anonyme / modèles -----------------------------------------------------------
 console.log("\nAccès public et modèles");
 await as("anon");
-ok((await q("select * from public.boards where is_template")).length === 5, "anon lit les 5 modèles");
+ok((await q("select * from public.boards where is_template and locale = 'fr'")).length === 5, "anon lit les 5 modèles français");
+ok((await q("select * from public.boards where is_template and locale = 'en'")).length === 5, "… et les 5 modèles anglais");
 const [pub] = await q("select * from public.get_game_public($1)", [vgame.code]);
 ok(pub.player_count === 2 && pub.title === "Test 2", "get_game_public accessible sans session");
 await expectError(q("select * from public.games"), /permission denied/, "anon ne lit pas les parties");
@@ -385,6 +386,87 @@ await as(A);
 await q("delete from public.boards where id = $1", [boardId]);
 await as(A);
 ok((await q("select * from public.games where board_id = $1", [boardId])).length === 0, "supprimer un bingo supprime ses parties");
+
+// --- fin automatique, expiration, réactions, push ----------------------------------
+console.log("\nFin automatique, réactions, push");
+const NOEL = "00000000-0000-4000-8000-000000000003";
+const EURO = "00000000-0000-4000-8000-000000000004";
+await as(B);
+const [auto] = await q("select * from public.create_game($1, 'free', 'first_bingo')", [NOEL]);
+ok(auto.auto_end === "first_bingo", "partie avec fin au premier bingo");
+const [autoB] = await q("select * from public.join_game($1, 'Bob')", [auto.code]);
+await as(D);
+const [autoD] = await q("select * from public.join_game($1, 'Dan')", [auto.code]);
+await as(B);
+const firstRow = autoB.checked.map((v, i) => v || i < 5);
+await q("update public.game_players set checked = $1 where id = $2", [JSON.stringify(firstRow), autoB.id]);
+ok((await q("select status from public.games where id = $1", [auto.id]))[0].status === "finished", "premier bingo → partie terminée automatiquement");
+
+const [timed] = await q("select * from public.create_game($1, 'free', 'manual', 3)", [EURO]);
+ok(timed.ends_at !== null, "partie avec durée → date de fin");
+await expectError(q("select * from public.create_game($1, 'free', 'manual', 90)", [NOEL]), /invalid_duration/, "durée bornée à 30 jours");
+await db.exec("reset role");
+await q("update public.games set ends_at = now() - interval '1 minute' where id = $1", [timed.id]);
+await as(B);
+const [timedB] = await q("select * from public.join_game($1, 'Bob')", [timed.code]);
+await expectError(
+  q("update public.game_players set checked = $1 where id = $2", [JSON.stringify(timedB.checked.map(() => true)), timedB.id]),
+  /game_finished/,
+  "plus de coches après l'échéance",
+);
+ok((await q("select public.check_game_expiry($1) as s", [timed.id]))[0].s === "finished", "check_game_expiry termine une partie échue");
+await expectError(q("select public.finish_expired_games()"), /permission denied/, "finish_expired_games réservée au serveur");
+
+// réactions
+await as(D);
+await q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '🔥')", [auto.id, autoB.id]);
+ok((await q("select * from public.game_reactions where game_id = $1", [auto.id])).length === 1, "un joueur réagit au bingo d'un autre");
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '🔥')", [auto.id, autoB.id]),
+  /duplicate key/,
+  "une seule fois le même emoji",
+);
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '💩')", [auto.id, autoB.id]),
+  /check constraint/,
+  "emojis limités à la liste",
+);
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '😂')", [auto.id, peerB.id]),
+  /row-level security/,
+  "la cible doit appartenir à la partie",
+);
+await as(A);
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '😂')", [auto.id, autoB.id]),
+  /row-level security/,
+  "un non-membre ne réagit pas",
+);
+ok((await q("select * from public.game_reactions where game_id = $1", [auto.id])).length === 0, "un non-membre ne voit pas les réactions");
+await as(D);
+await q("delete from public.game_reactions where game_id = $1", [auto.id]);
+ok((await q("select * from public.game_reactions where game_id = $1", [auto.id])).length === 0, "on retire sa réaction");
+
+// abonnements push
+await as(B);
+await q("select public.save_push_subscription('https://push.example/abc', 'k', 'a', 'en')");
+ok((await q("select * from public.push_subscriptions")).length === 1, "un appareil s'abonne");
+await as(D);
+ok((await q("select * from public.push_subscriptions")).length === 0, "on ne voit pas les abonnements des autres");
+await q("select public.save_push_subscription('https://push.example/abc', 'k', 'a', 'fr')");
+await db.exec("reset role");
+const owners = await q("select user_id from public.push_subscriptions where endpoint = 'https://push.example/abc'");
+ok(owners.length === 1 && owners[0].user_id === D, "le même appareil passe au nouveau compte");
+await as(D);
+await q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'bingo', $2, '👏')", [auto.id, autoB.id]);
+const [{ data: exportedD }] = await q("select public.export_my_data() as data");
+ok(
+  exportedD.reactions.length === 1 && exportedD.push_devices.length === 1 && exportedD.account.id === D,
+  "export_my_data inclut réactions et appareils",
+);
+ok(!JSON.stringify(exportedD.push_devices).includes('"auth"'), "export sans les clés de chiffrement push");
+await expectError(q("select public.bb_export_my_data_v12()"), /permission denied/, "ancienne version de l'export non appelable");
+void autoD;
 
 // --- RGPD : export et suppression du compte ----------------------------------------
 console.log("\nRGPD");

@@ -17,6 +17,7 @@ const KNOWN = [
   "claim_not_found",
   "not_member",
   "invalid_photo",
+  "invalid_duration",
 ] as const;
 
 /**

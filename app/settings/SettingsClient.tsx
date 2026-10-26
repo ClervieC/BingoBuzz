@@ -6,6 +6,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { useT } from "@/components/I18nProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { LanguageSelector, ThemeSelector } from "@/components/PreferenceControls";
+import { PushSetting } from "@/components/PushPrompt";
 import { useToast } from "@/components/Toast";
 import { errorKey } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -40,7 +41,16 @@ function clearLocalData() {
   }
 }
 
-export function SettingsClient({ email, name }: { email: string | null; name: string | null }) {
+export function SettingsClient({
+  email,
+  name,
+  hostedGames,
+}: {
+  email: string | null;
+  name: string | null;
+  /** parties en cours dont on est l'hôte : elles s'arrêtent avec le compte */
+  hostedGames: { code: string; title: string; emoji: string }[];
+}) {
   const t = useT();
   const toast = useToast();
   const confirmId = useId();
@@ -130,6 +140,10 @@ export function SettingsClient({ email, name }: { email: string | null; name: st
         <LanguageSelector />
       </Section>
 
+      <Section title={t("push.title")}>
+        <PushSetting />
+      </Section>
+
       <Section title={t("settings.data")}>
         <p className="text-sm text-muted">{t("settings.data.body")}</p>
         <button type="button" className="btn btn-secondary mt-4 w-full" onClick={exportData} disabled={exporting}>
@@ -171,6 +185,19 @@ export function SettingsClient({ email, name }: { email: string | null; name: st
           }}
         >
           <p className="text-muted">{t("settings.delete.body")}</p>
+          {hostedGames.length > 0 && (
+            <div className="rounded-2xl bg-danger/10 p-3">
+              <p className="text-sm font-bold">{t("settings.delete.games")}</p>
+              <ul className="mt-1.5 space-y-1 text-sm">
+                {hostedGames.map((game) => (
+                  <li key={game.code} className="truncate">
+                    <span aria-hidden>{game.emoji} </span>
+                    {game.title} <span className="font-mono text-xs text-muted">· {game.code}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <label htmlFor={confirmId} className="label">
               {t("settings.delete.confirmLabel", { word })}

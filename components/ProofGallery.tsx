@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useProofUrls } from "@/hooks/useProofUrls";
 import { frenchSpacing } from "@/lib/phrases";
 import type { GameClaim, GamePlayer } from "@/types/bingo";
@@ -12,10 +12,12 @@ export function ProofGallery({
   claims,
   players,
   phraseText,
+  renderReactions,
 }: {
   claims: GameClaim[];
   players: GamePlayer[];
   phraseText: (phraseId: string) => string;
+  renderReactions?: (claim: GameClaim) => ReactNode;
 }) {
   const t = useT();
   const photos = claims.filter((c) => c.photo_path && c.status !== "rejected");
@@ -68,6 +70,7 @@ export function ProofGallery({
                     <span className="mt-1 block text-xs text-muted">{t("game.photos.by", { name: nameOf(claim.claimed_by) })}</span>
                   </span>
                 </button>
+                {renderReactions && <div className="mt-1.5">{renderReactions(claim)}</div>}
               </li>
             );
           })}
@@ -90,6 +93,7 @@ export function ProofGallery({
                 className="max-h-[65dvh] w-full rounded-2xl object-contain"
               />
             )}
+            {renderReactions?.(viewing)}
           </div>
         )}
       </BottomSheet>

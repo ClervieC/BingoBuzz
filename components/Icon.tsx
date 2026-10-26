@@ -23,6 +23,7 @@ const PATHS = {
   more: "M12 6h.01M12 12h.01M12 18h.01",
   logout: "M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11",
   mail: "M3 6h18v12H3zM3 7l9 6 9-6",
+  bell: "M6 16V11a6 6 0 0112 0v5l2 2H4l2-2zM10 21h4",
   wifiOff: "M2 2l20 20M8.5 16.5a5 5 0 017 0M5 12.5a10 10 0 015.17-2.8M19 12.5a10 10 0 00-2.2-1.6M12 20h.01",
   flag: "M5 21V4M5 4h11l-2 4 2 4H5",
   shuffle: "M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5",

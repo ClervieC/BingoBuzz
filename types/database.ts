@@ -5,7 +5,17 @@
  * (les colonnes jsonb redeviennent alors `Json` : garder les casts dans lib/db.ts).
  */
 
-import type { BoardTheme, Cell, ClaimStatus, GameClaim, GameMode, GameStatus, GridSize } from "./bingo";
+import type {
+  BoardTheme,
+  Cell,
+  ClaimStatus,
+  GameAutoEnd,
+  GameClaim,
+  GameMode,
+  GameReaction,
+  GameStatus,
+  GridSize,
+} from "./bingo";
 
 type BoardRow = {
   id: string;
@@ -17,6 +27,7 @@ type BoardRow = {
   is_template: boolean;
   created_at: string;
   updated_at: string;
+  locale?: "fr" | "en";
 };
 
 type BoardPhraseRow = {
@@ -36,6 +47,8 @@ type GameRow = {
   status: GameStatus;
   created_at: string;
   ended_at: string | null;
+  auto_end: GameAutoEnd;
+  ends_at: string | null;
 };
 
 type GamePlayerRow = {
@@ -113,6 +126,26 @@ export type Database = {
           },
         ];
       };
+      game_reactions: {
+        Row: { [K in keyof GameReaction]: GameReaction[K] };
+        Insert: Pick<GameReaction, "game_id" | "target_type" | "target_id" | "emoji">;
+        Update: never;
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          endpoint: string;
+          p256dh: string;
+          auth: string;
+          locale: "fr" | "en";
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       game_claims: {
         // type littéral (et non interface) : exigé par les types génériques de supabase-js
         Row: { [K in keyof GameClaim]: GameClaim[K] };
@@ -168,7 +201,7 @@ export type Database = {
         Returns: string;
       };
       create_game: {
-        Args: { p_board_id: string; p_mode?: GameMode };
+        Args: { p_board_id: string; p_mode?: GameMode; p_auto_end?: GameAutoEnd; p_duration_days?: number | null };
         Returns: GameRow;
       };
       join_game: {
@@ -182,6 +215,18 @@ export type Database = {
       resolve_claim: {
         Args: { p_claim_id: string; p_accept: boolean };
         Returns: { [K in keyof GameClaim]: GameClaim[K] };
+      };
+      check_game_expiry: {
+        Args: { p_game_id: string };
+        Returns: GameStatus;
+      };
+      save_push_subscription: {
+        Args: { p_endpoint: string; p_p256dh: string; p_auth: string; p_locale?: string };
+        Returns: undefined;
+      };
+      finish_expired_games: {
+        Args: Record<string, never>;
+        Returns: number;
       };
       board_locked: {
         Args: { p_board_id: string };
@@ -215,6 +260,7 @@ export type Database = {
       game_mode: GameMode;
       game_status: GameStatus;
       claim_status: ClaimStatus;
+      game_auto_end: GameAutoEnd;
     };
     CompositeTypes: { [_ in never]: never };
   };

@@ -88,7 +88,7 @@ export const BingoCell = memo(function BingoCell({
         </span>
       )}
       <div ref={boxRef} className="absolute inset-[5px] flex items-center justify-center">
-        <div ref={textRef} lang="fr" className="bingo-cell-text relative w-full">
+        <div ref={textRef} className="bingo-cell-text relative w-full">
           {cell.free ? `★ ${label}` : label}
         </div>
       </div>

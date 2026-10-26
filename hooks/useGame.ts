@@ -9,7 +9,21 @@ import { fetchBoard } from "@/lib/db";
 import { errorKey } from "@/lib/errors";
 import { haptics } from "@/lib/haptics";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { BoardWithPhrases, Game, GameClaim, GameEvent, GamePlayer, PublicGame } from "@/types/bingo";
+import type {
+  BoardWithPhrases,
+  Game,
+  GameClaim,
+  GameEvent,
+  GamePlayer,
+  GameReaction,
+  PublicGame,
+  ReactionEmoji,
+} from "@/types/bingo";
+
+/** Partie dont la durée choisie par l'hôte est écoulée. */
+function isExpired(game: Game) {
+  return game.status === "playing" && game.ends_at !== null && new Date(game.ends_at) <= new Date();
+}
 
 export type Phase = "loading" | "join" | "ready" | "error";
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "offline";
@@ -55,6 +69,7 @@ export function useGame(publicGame: PublicGame) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   // propositions en attente + confirmées avec photo (mode « peer »)
   const [claims, setClaims] = useState<GameClaim[]>([]);
+  const [reactions, setReactions] = useState<GameReaction[]>([]);
   const [board, setBoard] = useState<BoardWithPhrases | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [online, setOnline] = useState<ReadonlySet<string>>(new Set());
@@ -157,7 +172,7 @@ export function useGame(publicGame: PublicGame) {
       return;
     }
 
-    const [gameRes, playersRes, eventsRes, claimsRes] = await Promise.all([
+    const [gameRes, playersRes, eventsRes, claimsRes, reactionsRes] = await Promise.all([
       supabase.from("games").select("*").eq("id", gameId).maybeSingle(),
       supabase.from("game_players").select("*").eq("game_id", gameId),
       supabase.from("game_events").select("*").eq("game_id", gameId),
@@ -168,6 +183,7 @@ export function useGame(publicGame: PublicGame) {
         .eq("game_id", gameId)
         .or("status.eq.pending,and(status.eq.confirmed,photo_path.not.is.null)")
         .order("created_at", { ascending: false }),
+      supabase.from("game_reactions").select("*").eq("game_id", gameId),
     ]);
     if (gameRes.error) throw gameRes.error;
     if (playersRes.error) throw playersRes.error;
@@ -179,10 +195,18 @@ export function useGame(publicGame: PublicGame) {
       return;
     }
 
-    setGame(gameRes.data);
+    let loaded = gameRes.data;
+    // durée écoulée : on termine la partie sans attendre la tâche planifiée
+    if (isExpired(loaded)) {
+      const { data: status } = await supabase.rpc("check_game_expiry", { p_game_id: gameId });
+      if (status) loaded = { ...loaded, status };
+    }
+
+    setGame(loaded);
     applyPlayers(playersRes.data ?? [], "replace");
     setEvents(eventsRes.data ?? []);
     setClaims(claimsRes.data ?? []);
+    setReactions(reactionsRes.data ?? []);
 
     if (!boardLoaded.current) {
       boardLoaded.current = true;
@@ -345,6 +369,23 @@ export function useGame(publicGame: PublicGame) {
       )
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "game_reactions", filter: `game_id=eq.${gameId}` },
+        (payload: RealtimePostgresChangesPayload<GameReaction>) => {
+          if (payload.eventType !== "INSERT") return;
+          const reaction = payload.new;
+          setReactions((list) => (list.some((r) => r.id === reaction.id) ? list : [...list, reaction]));
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "game_reactions" },
+        (payload: RealtimePostgresChangesPayload<GameReaction>) => {
+          const id = payload.old && "id" in payload.old ? payload.old.id : undefined;
+          if (id) setReactions((list) => list.filter((r) => r.id !== id));
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
         (payload: RealtimePostgresChangesPayload<Game>) => {
           if (payload.eventType === "UPDATE") setGame(payload.new);
@@ -389,6 +430,17 @@ export function useGame(publicGame: PublicGame) {
       if (channel) void supabase.removeChannel(channel);
     };
   }, [phase, subscribe, supabase]);
+
+  // échéance atteinte pendant qu'on regarde la partie
+  const endsAt = game?.status === "playing" ? game.ends_at : null;
+  useEffect(() => {
+    if (!endsAt) return;
+    const delay = new Date(endsAt).getTime() - Date.now();
+    // setTimeout plafonne à ~24,8 jours ; au-delà, le rechargement suffira
+    if (delay > 2 ** 31 - 1) return;
+    const timer = window.setTimeout(() => void safeLoad(), Math.max(0, delay) + 1000);
+    return () => window.clearTimeout(timer);
+  }, [endsAt, safeLoad]);
 
   // veille / retour sur l'onglet / réseau
   useEffect(() => {
@@ -588,6 +640,36 @@ export function useGame(publicGame: PublicGame) {
     else setGame(data);
   }, [supabase, gameId, toast, t]);
 
+  /** Ajoute ou retire sa réaction sur un bingo ou une proposition. */
+  const toggleReaction = useCallback(
+    async (targetType: GameReaction["target_type"], targetId: string, emoji: ReactionEmoji) => {
+      const uid = userIdRef.current;
+      if (!uid) return;
+      const mine = reactions.find(
+        (r) => r.target_type === targetType && r.target_id === targetId && r.user_id === uid && r.emoji === emoji,
+      );
+      if (mine) {
+        setReactions((list) => list.filter((r) => r.id !== mine.id));
+        const { error } = await supabase.from("game_reactions").delete().eq("id", mine.id);
+        if (error) void safeLoad();
+        return;
+      }
+      haptics.tap();
+      const { data, error } = await supabase
+        .from("game_reactions")
+        .insert({ game_id: gameId, target_type: targetType, target_id: targetId, emoji })
+        .select()
+        .single();
+      if (error) {
+        if (!/duplicate key/i.test(error.message)) toast.show(t(errorKey(error)), { tone: "error" });
+        void safeLoad();
+        return;
+      }
+      setReactions((list) => (list.some((r) => r.id === data.id) ? list : [...list, data]));
+    },
+    [reactions, supabase, gameId, safeLoad, toast, t],
+  );
+
   const leave = useCallback(async () => {
     if (!me) return;
     const { error } = await supabase.from("game_players").delete().eq("id", me.id);
@@ -614,6 +696,8 @@ export function useGame(publicGame: PublicGame) {
     resolveClaim,
     proposeClaim,
     cancelClaim,
+    reactions,
+    toggleReaction,
     connection,
     online,
     notice,

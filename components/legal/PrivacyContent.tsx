@@ -41,6 +41,13 @@ function PrivacyFr() {
           réduite et ré-encodée sur ton téléphone avant l’envoi, ce qui supprime ses métadonnées (dont la position GPS).
         </li>
         <li>
+          <strong>Réactions</strong> (emoji sur un bingo ou une proposition), visibles par les joueurs de la partie.
+        </li>
+        <li>
+          <strong>Notifications (facultatives)</strong> : si tu les actives, l’adresse technique d’envoi fournie par ton
+          navigateur pour cet appareil, et la langue des messages.
+        </li>
+        <li>
           <strong>Acceptation des conditions</strong> : date et version des conditions acceptées, fin de l’accueil
           (onboarding).
         </li>
@@ -82,7 +89,9 @@ function PrivacyFr() {
       <p>
         Tes données sont conservées tant que ton compte existe. Quand tu supprimes ton compte, elles sont effacées
         immédiatement : profil, bingos, parties que tu animes, participations, validations et photos de preuve. Une photo
-        est aussi supprimée quand tu annules la proposition correspondante. Les journaux techniques
+        est aussi supprimée quand tu annules la proposition correspondante ; les photos qui ne sont plus rattachées à
+        aucune partie sont effacées chaque jour automatiquement. Désactiver les notifications supprime l’abonnement de
+        l’appareil. Les journaux techniques
         de nos hébergeurs sont conservés pour des durées limitées fixées par ces derniers.
       </p>
 
@@ -98,6 +107,10 @@ function PrivacyFr() {
         </li>
         <li>
           <strong>Google</strong>, uniquement si tu choisis « Continuer avec Google ».
+        </li>
+        <li>
+          <strong>Service de notifications de ton navigateur</strong> (Google, Apple ou Mozilla), uniquement si tu
+          actives les notifications : il achemine des messages chiffrés de bout en bout jusqu’à ton appareil.
         </li>
       </ul>
       <p>
@@ -197,6 +210,13 @@ function PrivacyEn() {
           re-encoded on your phone before upload, which strips its metadata (including GPS location).
         </li>
         <li>
+          <strong>Reactions</strong> (emoji on a bingo or a suggestion), visible to players of the game.
+        </li>
+        <li>
+          <strong>Notifications (optional)</strong>: if you turn them on, the technical delivery address your browser
+          provides for this device, and the language of the messages.
+        </li>
+        <li>
           <strong>Acceptance of the terms</strong>: date and version of the accepted terms, onboarding completion.
         </li>
         <li>
@@ -234,7 +254,8 @@ function PrivacyEn() {
       <p>
         Your data is kept as long as your account exists. When you delete your account, it is erased immediately:
         profile, bingos, games you host, participations, validations and proof photos. A photo is also deleted when you
-        cancel its suggestion. Technical logs are kept by our hosting
+        cancel its suggestion; photos no longer attached to any game are erased automatically every day. Turning
+        notifications off deletes the device subscription. Technical logs are kept by our hosting
         providers for limited periods set by them.
       </p>
 
@@ -249,6 +270,10 @@ function PrivacyEn() {
         </li>
         <li>
           <strong>Google</strong>, only if you choose “Continue with Google”.
+        </li>
+        <li>
+          <strong>Your browser’s push service</strong> (Google, Apple or Mozilla), only if you turn notifications on:
+          it delivers end-to-end encrypted messages to your device.
         </li>
       </ul>
       <p>

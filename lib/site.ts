@@ -7,7 +7,7 @@ export function getSiteUrl(): string {
   if (vercel) return `https://${vercel}`;
 
   if (typeof window !== "undefined") return window.location.origin;
-  return "http://localhost:3000";
+  return "https://bingobuzz.vercel.app";
 }
 
 /** Côté navigateur, l'origine réelle prime (aperçus Vercel, réseau local…). */

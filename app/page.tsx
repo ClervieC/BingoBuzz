@@ -13,7 +13,7 @@ function safeNext(next: string | undefined): string | null {
 }
 
 export default async function HomePage({ searchParams }: Props) {
-  const [params, user, { t }] = await Promise.all([searchParams, getServerUser(), getT()]);
+  const [params, user, { t, locale }] = await Promise.all([searchParams, getServerUser(), getT()]);
   const next = safeNext(params.next);
 
   // Sans compte, l'accueil EST l'écran de connexion (connexion obligatoire).
@@ -34,7 +34,7 @@ export default async function HomePage({ searchParams }: Props) {
   const supabase = await getSupabaseServerClient();
   const [mine, templates, active] = await Promise.all([
     fetchOwnBoards(supabase, user.id).catch(() => []),
-    fetchTemplates(supabase).catch(() => []),
+    fetchTemplates(supabase, locale).catch(() => []),
     fetchActiveGames(supabase, user.id).catch(() => []),
   ]);
 

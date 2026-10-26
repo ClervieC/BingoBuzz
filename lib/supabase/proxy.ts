@@ -8,11 +8,12 @@ import { supabaseEnv } from "./env";
  * Routes accessibles sans être connecté.
  * `/play/…` reste public pour que les robots d'aperçu (WhatsApp, Messenger)
  * lisent les métadonnées Open Graph ; la page demande ensuite de se connecter.
+ * `/api/…` : chaque route vérifie elle-même son secret (push, tâche planifiée).
  */
-const PUBLIC_PREFIXES = ["/login", "/auth/", "/play/", "/privacy", "/terms"];
+const PUBLIC_PREFIXES = ["/login", "/auth/", "/play/", "/privacy", "/terms", "/offline", "/api/"];
 
 /** Routes accessibles à un compte qui n'a pas encore terminé l'accueil. */
-const ONBOARDING_EXEMPT = ["/welcome", "/auth/", "/privacy", "/terms", "/login"];
+const ONBOARDING_EXEMPT = ["/welcome", "/auth/", "/privacy", "/terms", "/login", "/offline", "/api/"];
 
 function matches(pathname: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useProofUrls } from "@/hooks/useProofUrls";
 import { frenchSpacing } from "@/lib/phrases";
 import { BottomSheet } from "./BottomSheet";
@@ -20,6 +20,7 @@ export function ClaimsPanel({
   onResolve,
   onCancel,
   showEmpty = false,
+  renderReactions,
 }: {
   claims: GameClaim[];
   players: GamePlayer[];
@@ -29,6 +30,7 @@ export function ClaimsPanel({
   /** annuler sa propre proposition (supprime aussi la photo) */
   onCancel: (claim: GameClaim) => void;
   showEmpty?: boolean;
+  renderReactions?: (claim: GameClaim) => ReactNode;
 }) {
   const t = useT();
   const photoUrls = useProofUrls(claims);
@@ -77,6 +79,7 @@ export function ClaimsPanel({
                     </button>
                   )}
                 </div>
+                {renderReactions && <div className="mt-2">{renderReactions(claim)}</div>}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button type="button" className="btn btn-sm bg-success text-on-status" onClick={() => onResolve(claim.id, true)}>
                     <Icon name="check" size={18} strokeWidth={3} />

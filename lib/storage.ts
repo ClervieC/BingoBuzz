@@ -19,17 +19,9 @@ export function writeJson(key: string, value: unknown): void {
   }
 }
 
-export function removeKey(key: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // ignoré
-  }
-}
-
 export const storageKeys = {
   solo: (boardId: string) => `bingobuzz:solo:${boardId}`,
   nickname: "bingobuzz:nickname",
   celebrated: (gameId: string) => `bingobuzz:celebrated:${gameId}`,
+  pushDismissed: "bingobuzz:push-dismissed",
 };
