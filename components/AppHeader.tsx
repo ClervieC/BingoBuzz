@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Icon } from "./Icon";
+import { Logo } from "./Logo";
 
 /**
  * Barre supérieure collante, compatible encoche (safe-area-inset-top).
@@ -25,11 +26,8 @@ export function AppHeader({
             <Icon name="back" />
           </Link>
         ) : (
-          <Link href="/" className="-ml-1 flex items-center gap-2 font-extrabold tracking-tight">
-            <span aria-hidden className="grid h-8 w-8 place-items-center rounded-xl bg-accent text-lg text-accent-fg">
-              B
-            </span>
-            <span className="text-lg">BingoBuzz</span>
+          <Link href="/" className="-ml-1 flex items-center">
+            <Logo size={34} priority />
           </Link>
         )}
         {title && <h1 className="min-w-0 flex-1 truncate text-lg font-extrabold">{title}</h1>}

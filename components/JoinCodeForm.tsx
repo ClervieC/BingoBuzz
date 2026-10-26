@@ -24,13 +24,13 @@ export function JoinCodeForm() {
 
   return (
     <form onSubmit={submit} noValidate>
-      <label htmlFor={id} className="label">
+      <label htmlFor={id} className="sr-only">
         {t("home.join.label")}
       </label>
       <div className="flex gap-2">
         <input
           id={id}
-          className="input text-center font-mono text-xl font-bold tracking-[0.3em] uppercase"
+          className="input min-w-0 font-mono text-lg font-bold tracking-[0.25em] uppercase placeholder:font-sans placeholder:text-base placeholder:font-normal placeholder:tracking-normal placeholder:normal-case"
           value={value}
           onChange={(e) => {
             // un lien collé est accepté tel quel ; sinon on normalise au fil de la frappe
@@ -38,7 +38,7 @@ export function JoinCodeForm() {
             setValue(raw.includes("/") ? raw : normalizeCode(raw));
             setError(false);
           }}
-          placeholder={t("home.join.placeholder")}
+          placeholder={t("home.join.placeholderLong")}
           autoComplete="off"
           autoCapitalize="characters"
           autoCorrect="off"

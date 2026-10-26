@@ -1,11 +1,11 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useRef, useState, type FormEvent } from "react";
-import { ensureSession } from "@/lib/auth";
+import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { requireUser } from "@/lib/auth";
 import { errorKey } from "@/lib/errors";
 import { cleanPhrase, isDuplicate, MAX_PHRASES, parsePhrases } from "@/lib/phrases";
-import { hasFreeCenter, requiredPhraseCount } from "@/lib/random";
+import { centerIndex, hasFreeCenter, requiredPhraseCount } from "@/lib/random";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { THEME_COLOR_NAMES, THEME_COLORS, THEME_EMOJIS, themeStyle } from "@/lib/themes";
 import type { BoardWithPhrases, GridSize, ThemeColor } from "@/types/bingo";
@@ -16,7 +16,44 @@ import { useToast } from "./Toast";
 
 const SIZES: GridSize[] = [3, 4, 5];
 
-export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
+/** Carte d'étape numérotée. */
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <section className="card p-4 sm:p-5">
+      <h2 className="mb-4 flex items-center gap-3 text-lg font-extrabold">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-sm font-black text-accent-fg">
+          {n}
+        </span>
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/** Petite grille N×N illustrant une taille (sélecteur de taille). */
+function SizeGlyph({ size, active }: { size: number; active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className="grid gap-[3px]"
+      style={{ gridTemplateColumns: `repeat(${size}, 1fr)`, width: 40, height: 40 }}
+    >
+      {Array.from({ length: size * size }, (_, i) => (
+        <span key={i} className={`rounded-[3px] ${active ? "bg-accent" : "bg-border"}`} />
+      ))}
+    </span>
+  );
+}
+
+export function BoardEditor({
+  initial,
+  returnTo,
+}: {
+  initial?: BoardWithPhrases;
+  /** page où revenir après l’enregistrement (sinon la page du bingo) */
+  returnTo?: string;
+}) {
   const t = useT();
   const toast = useToast();
   const router = useRouter();
@@ -42,20 +79,35 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
   const progress = Math.min(1, phrases.length / required);
   // les plus récentes en haut, juste sous le champ de saisie
   const displayed = useMemo(() => phrases.map((text, i) => ({ text, i })).reverse(), [phrases]);
+  const ideas = useMemo(
+    () =>
+      t("editor.ideas.list")
+        .split("|")
+        .filter((idea) => !isDuplicate(idea, phrases))
+        .slice(0, 8),
+    [t, phrases],
+  );
+  const palette = THEME_COLORS[color];
+
+  function addPhrase(raw: string): boolean {
+    const phrase = cleanPhrase(raw);
+    if (!phrase) return false;
+    if (isDuplicate(phrase, phrases)) {
+      setDraftError(t("editor.phrases.duplicate"));
+      return false;
+    }
+    if (phrases.length >= MAX_PHRASES) return false;
+    setPhrases((list) => [...list, phrase]);
+    setDraftError(null);
+    return true;
+  }
 
   function addDraft(e?: FormEvent) {
     e?.preventDefault();
-    const phrase = cleanPhrase(draft);
-    if (!phrase) return;
-    if (isDuplicate(phrase, phrases)) {
-      setDraftError(t("editor.phrases.duplicate"));
-      return;
+    if (addPhrase(draft)) {
+      setDraft("");
+      addInput.current?.focus();
     }
-    if (phrases.length >= MAX_PHRASES) return;
-    setPhrases((list) => [...list, phrase]);
-    setDraft("");
-    setDraftError(null);
-    addInput.current?.focus();
   }
 
   function addPasted() {
@@ -79,7 +131,7 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
 
     setSaving(true);
     try {
-      await ensureSession();
+      await requireUser();
       const supabase = getSupabaseBrowserClient();
       const { data: id, error: rpcError } = await supabase.rpc("save_board", {
         p_id: initial?.id ?? null,
@@ -92,7 +144,7 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
       if (rpcError || !id) throw rpcError ?? new Error("save_board");
 
       toast.show(t("editor.saved"), { tone: "success" });
-      router.push(`/boards/${id}`);
+      router.push(returnTo ?? `/boards/${id}`);
       router.refresh();
     } catch (err) {
       setError(t(errorKey(err)));
@@ -100,39 +152,74 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
     }
   }
 
+  // aperçu : cases remplies dans l'ordre de lecture, case libre au centre
+  const total = gridSize * gridSize;
+  const center = free ? centerIndex(gridSize) : -1;
+  let filledSoFar = 0;
+  const previewCells = Array.from({ length: total }, (_, i) => {
+    if (i === center) return "free" as const;
+    filledSoFar += 1;
+    return filledSoFar <= phrases.length ? ("filled" as const) : ("empty" as const);
+  });
+
   return (
     <div className="themed" style={themeStyle({ emoji, color })}>
-      <div className="page space-y-7 pt-4 pb-36">
-        {/* Titre */}
-        <section>
-          <label htmlFor={ids.title} className="label">
-            {t("editor.title.label")}
-          </label>
-          <div className="flex gap-2">
-            <span
-              aria-hidden
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-accent-soft text-2xl"
+      <div className="page stagger space-y-5 pt-4 pb-36">
+        {/* Aperçu vivant */}
+        <section
+          className="relative overflow-hidden rounded-3xl p-5 text-white shadow-lg transition-colors duration-500"
+          style={{ background: `linear-gradient(135deg, ${palette.light}, #1c1830)` }}
+          aria-hidden
+        >
+          <div className="flex items-center gap-4">
+            <div className="min-w-0 flex-1">
+              <span key={emoji} className="animate-bounce-in inline-block text-5xl leading-none">
+                {emoji}
+              </span>
+              <p className="mt-3 line-clamp-2 text-xl leading-tight font-black">
+                {title.trim() || t("editor.preview.untitled")}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-white/80">
+                {missing === 0
+                  ? `✨ ${t("editor.preview.ready")}`
+                  : t("editor.preview.filled", { count: Math.min(phrases.length, required), total: required })}
+              </p>
+            </div>
+            <div
+              className="grid shrink-0 rotate-3 gap-1 rounded-2xl bg-white/10 p-2"
+              style={{ gridTemplateColumns: `repeat(${gridSize}, 1fr)`, width: 112, height: 112 }}
             >
-              {emoji}
-            </span>
-            <input
-              id={ids.title}
-              className="input"
-              value={title}
-              maxLength={80}
-              placeholder={t("editor.title.placeholder")}
-              onChange={(e) => setTitle(e.target.value)}
-              enterKeyHint="next"
-              autoComplete="off"
-            />
+              {previewCells.map((state, i) => (
+                <span
+                  key={`${gridSize}-${i}`}
+                  className={`rounded-[4px] transition-all duration-300 ${
+                    state === "free" ? "bg-amber-400" : state === "filled" ? "bg-white" : "bg-white/20"
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         </section>
 
-        {/* Thème */}
-        <section>
-          <h2 className="label">{t("editor.theme")}</h2>
+        {/* 1. Titre et thème */}
+        <Step n={1} title={t("editor.step.1")}>
+          <label htmlFor={ids.title} className="label">
+            {t("editor.title.label")}
+          </label>
+          <input
+            id={ids.title}
+            className="input text-lg font-bold"
+            value={title}
+            maxLength={80}
+            placeholder={t("editor.title.placeholder")}
+            onChange={(e) => setTitle(e.target.value)}
+            enterKeyHint="next"
+            autoComplete="off"
+          />
+
+          <p className="label mt-5">{t("editor.emoji")}</p>
           <div
-            className="-mx-4 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pb-2"
+            className="-mx-4 flex snap-x scroll-px-4 gap-2 overflow-x-auto px-4 pt-1 pb-2 sm:-mx-5 sm:px-5"
             role="radiogroup"
             aria-label={t("editor.emoji")}
           >
@@ -144,14 +231,16 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
                 aria-checked={emoji === e}
                 onClick={() => setEmoji(e)}
                 className={`grid h-12 w-12 shrink-0 snap-start place-items-center rounded-2xl text-2xl transition ${
-                  emoji === e ? "bg-accent-soft ring-2 ring-accent" : "bg-surface"
+                  emoji === e ? "scale-110 bg-accent-soft ring-2 ring-accent" : "bg-surface-2 active:scale-90"
                 }`}
               >
                 {e}
               </button>
             ))}
           </div>
-          <div className="mt-3 flex flex-wrap gap-3" role="radiogroup" aria-label={t("editor.color")}>
+
+          <p className="label mt-4">{t("editor.color")}</p>
+          <div className="flex flex-wrap gap-3" role="radiogroup" aria-label={t("editor.color")}>
             {THEME_COLOR_NAMES.map((name) => (
               <button
                 key={name}
@@ -160,21 +249,20 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
                 aria-checked={color === name}
                 aria-label={t(`editor.color.${name}`)}
                 onClick={() => setColor(name)}
-                className={`grid h-11 w-11 place-items-center rounded-full transition ${
-                  color === name ? "ring-2 ring-fg ring-offset-2 ring-offset-bg" : ""
+                className={`grid h-11 w-11 place-items-center rounded-full transition active:scale-90 ${
+                  color === name ? "scale-110 ring-2 ring-fg ring-offset-2 ring-offset-surface" : ""
                 }`}
                 style={{ background: THEME_COLORS[name].light }}
               >
-                {color === name && <Icon name="check" size={20} className="text-white" />}
+                {color === name && <Icon name="check" size={20} className="animate-bounce-in text-white" />}
               </button>
             ))}
           </div>
-        </section>
+        </Step>
 
-        {/* Grille */}
-        <section>
-          <h2 className="label">{t("editor.gridSize")}</h2>
-          <div className="grid grid-cols-3 gap-2 rounded-2xl bg-surface-2 p-1" role="radiogroup" aria-label={t("editor.gridSize")}>
+        {/* 2. Grille */}
+        <Step n={2} title={t("editor.step.2")}>
+          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t("editor.gridSize")}>
             {SIZES.map((size) => (
               <button
                 key={size}
@@ -182,10 +270,11 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
                 role="radio"
                 aria-checked={gridSize === size}
                 onClick={() => setGridSize(size)}
-                className={`min-h-[44px] rounded-xl font-bold transition ${
-                  gridSize === size ? "bg-surface shadow-sm" : "text-muted"
+                className={`flex flex-col items-center gap-2 rounded-2xl border-2 py-3 font-black transition active:scale-95 ${
+                  gridSize === size ? "border-accent bg-accent-soft" : "border-border bg-surface"
                 }`}
               >
+                <SizeGlyph size={size} active={gridSize === size} />
                 {size}×{size}
               </button>
             ))}
@@ -193,10 +282,13 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
 
           <label
             htmlFor={ids.free}
-            className={`mt-3 flex min-h-[56px] items-center gap-3 rounded-2xl bg-surface px-4 py-2 ${
+            className={`mt-3 flex min-h-[56px] items-center gap-3 rounded-2xl bg-surface-2 px-4 py-2 ${
               gridSize % 2 === 0 ? "opacity-50" : ""
             }`}
           >
+            <span aria-hidden className="text-xl">
+              ⭐
+            </span>
             <span className="flex-1">
               <span className="block font-semibold">{t("editor.freeCenter")}</span>
               <span className="block text-sm text-muted">
@@ -217,27 +309,26 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
               className="relative h-7 w-12 shrink-0 rounded-full bg-border transition peer-checked:bg-accent peer-focus-visible:outline peer-focus-visible:outline-3 peer-focus-visible:outline-accent after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5"
             />
           </label>
-        </section>
+        </Step>
 
-        {/* Phrases */}
-        <section>
-          <div className="mb-2 flex items-baseline justify-between gap-2">
-            <h2 className="text-[0.95rem] font-bold">{t("editor.phrases")}</h2>
-            <span className="text-sm font-bold tabular-nums">
-              {phrases.length} / {required}
-            </span>
-          </div>
-          <div
-            className="h-2 overflow-hidden rounded-full bg-surface-2"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={required}
-            aria-valuenow={Math.min(phrases.length, required)}
-          >
+        {/* 3. Phrases */}
+        <Step n={3} title={t("editor.step.3")}>
+          <div className="flex items-center gap-3">
             <div
-              className={`h-full rounded-full transition-all ${missing > 0 ? "bg-accent" : "bg-success"}`}
-              style={{ width: `${progress * 100}%` }}
-            />
+              className="h-2.5 flex-1 overflow-hidden rounded-full bg-surface-2"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={required}
+              aria-valuenow={Math.min(phrases.length, required)}
+            >
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${missing > 0 ? "bg-accent" : "bg-success"}`}
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+            <span key={phrases.length} className="animate-pop text-sm font-black tabular-nums">
+              {phrases.length}/{required}
+            </span>
           </div>
           <p className={`mt-2 text-sm ${missing > 0 ? "text-muted" : "font-semibold text-success"}`} aria-live="polite">
             {missing > 0
@@ -269,7 +360,12 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
                 aria-invalid={draftError ? true : undefined}
                 aria-describedby={draftError ? `${ids.add}-err` : undefined}
               />
-              <button type="submit" className="btn btn-primary shrink-0 px-4" disabled={!draft.trim()} aria-label={t("editor.phrases.add")}>
+              <button
+                type="submit"
+                className="btn btn-primary shrink-0 px-4"
+                disabled={!draft.trim()}
+                aria-label={t("editor.phrases.add")}
+              >
                 <Icon name="plus" />
               </button>
             </div>
@@ -280,7 +376,27 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
             )}
           </form>
 
-          <div className="mt-3 flex gap-2">
+          {ideas.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-sm font-bold">💡 {t("editor.ideas")}</p>
+              <div className="flex flex-wrap gap-2">
+                {ideas.map((idea) => (
+                  <button
+                    key={idea}
+                    type="button"
+                    onClick={() => addPhrase(idea)}
+                    aria-label={t("editor.ideas.add", { text: idea })}
+                    className="animate-rise inline-flex min-h-[36px] items-center gap-1 rounded-full border border-dashed border-accent/50 px-3 text-sm font-semibold transition hover:bg-accent-soft active:scale-95"
+                  >
+                    <Icon name="plus" size={14} className="text-accent" />
+                    {idea}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-2">
             <button type="button" className="btn btn-ghost btn-sm flex-1" onClick={() => setPasteOpen(true)}>
               <Icon name="copy" size={20} />
               {t("editor.phrases.paste")}
@@ -301,10 +417,15 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
           {phrases.length === 0 ? (
             <p className="mt-6 text-center text-muted">{t("editor.phrases.empty")}</p>
           ) : (
-            <ul className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface">
+            <ul className="mt-4 space-y-2">
               {displayed.map(({ text, i }) => (
-                <li key={text} className="flex items-center gap-2 py-1 pr-1 pl-4">
-                  <span className="w-6 shrink-0 text-xs font-bold text-muted tabular-nums">{i + 1}</span>
+                <li
+                  key={text}
+                  className="animate-rise flex items-center gap-2 rounded-2xl bg-surface-2 py-1 pr-1 pl-3"
+                >
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-black text-accent tabular-nums">
+                    {i + 1}
+                  </span>
                   <span className="min-w-0 flex-1 py-2 break-words">{text}</span>
                   <button
                     type="button"
@@ -318,18 +439,19 @@ export function BoardEditor({ initial }: { initial?: BoardWithPhrases }) {
               ))}
             </ul>
           )}
-        </section>
+        </Step>
       </div>
 
       {/* Barre d'enregistrement collée en bas, au-dessus de l'indicateur d'accueil iOS */}
       <div className="pb-safe fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg/90 pt-3 backdrop-blur-md">
         <div className="page">
           {error && (
-            <p role="alert" className="mb-2 text-center text-sm font-semibold text-danger">
+            <p role="alert" className="animate-rise mb-2 text-center text-sm font-semibold text-danger">
               {error}
             </p>
           )}
           <button type="button" className="btn btn-primary w-full" onClick={save} disabled={saving}>
+            {missing === 0 && <span aria-hidden>🎉</span>}
             {saving ? t("editor.saving") : t("editor.save")}
           </button>
         </div>

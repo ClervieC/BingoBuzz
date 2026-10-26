@@ -1,76 +1,42 @@
-import Link from "next/link";
-import { AppHeader } from "@/components/AppHeader";
-import { BoardCard } from "@/components/BoardCard";
-import { HeaderNav } from "@/components/HeaderNav";
-import { Icon } from "@/components/Icon";
-import { JoinCodeForm } from "@/components/JoinCodeForm";
-import { fetchTemplates } from "@/lib/db";
+import { redirect } from "next/navigation";
+import { AuthScreen } from "@/components/auth/AuthScreen";
+import { HomeView } from "@/components/HomeView";
+import { fetchActiveGames, fetchOwnBoards, fetchTemplates } from "@/lib/db";
 import { getT } from "@/lib/i18n/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { getServerUser } from "@/lib/supabase/user";
 
-export default async function HomePage() {
-  const [{ t }, templates] = await Promise.all([
-    getT(),
-    getSupabaseServerClient()
-      .then(fetchTemplates)
-      .catch(() => []),
+type Props = { searchParams: Promise<{ error?: string; next?: string; deleted?: string }> };
+
+function safeNext(next: string | undefined): string | null {
+  return next?.startsWith("/") && !next.startsWith("//") && next !== "/" ? next : null;
+}
+
+export default async function HomePage({ searchParams }: Props) {
+  const [params, user, { t }] = await Promise.all([searchParams, getServerUser(), getT()]);
+  const next = safeNext(params.next);
+
+  // Sans compte, l'accueil EST l'écran de connexion (connexion obligatoire).
+  if (!user || user.isAnonymous) {
+    return (
+      <AuthScreen
+        t={t}
+        next={next ?? "/"}
+        callbackError={params.error === "1"}
+        notice={params.deleted === "1" ? t("settings.delete.done") : null}
+      />
+    );
+  }
+
+  // déjà connecté mais renvoyé ici par une redirection : on repart tout de suite
+  if (next) redirect(next);
+
+  const supabase = await getSupabaseServerClient();
+  const [mine, templates, active] = await Promise.all([
+    fetchOwnBoards(supabase, user.id).catch(() => []),
+    fetchTemplates(supabase).catch(() => []),
+    fetchActiveGames(supabase, user.id).catch(() => []),
   ]);
 
-  return (
-    <>
-      <AppHeader actions={<HeaderNav />} />
-      <main className="page pb-safe space-y-10 pt-6">
-        <section className="space-y-5">
-          <div className="grid w-fit grid-cols-3 gap-1" aria-hidden>
-            {["💬", "⏰", "☔", "🎤", "★", "🙃", "📞", "🍰", "🎉"].map((e, i) => (
-              <span
-                key={e}
-                className={`grid h-9 w-9 place-items-center rounded-lg text-lg ${
-                  [0, 4, 8].includes(i) ? "bg-accent text-accent-fg" : "bg-surface"
-                }`}
-              >
-                {e}
-              </span>
-            ))}
-          </div>
-          <h1 className="text-[2rem] leading-[1.1] font-black tracking-tight text-balance">{t("home.title")}</h1>
-          <p className="text-lg text-muted">{t("home.subtitle")}</p>
-          <Link href="/create" className="btn btn-primary w-full text-lg sm:w-auto">
-            <Icon name="plus" />
-            {t("home.create")}
-          </Link>
-        </section>
-
-        <section className="card p-5">
-          <h2 className="mb-3 text-lg font-extrabold">{t("home.join.title")}</h2>
-          <JoinCodeForm />
-        </section>
-
-        {templates.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-lg font-extrabold">{t("home.templates")}</h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {templates.map((board) => (
-                <BoardCard key={board.id} board={board} />
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section>
-          <h2 className="mb-3 text-lg font-extrabold">{t("home.how.title")}</h2>
-          <ol className="space-y-3">
-            {(["home.how.1", "home.how.2", "home.how.3"] as const).map((key, i) => (
-              <li key={key} className="flex items-start gap-3">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent-soft font-black text-accent">
-                  {i + 1}
-                </span>
-                <span className="pt-1">{t(key)}</span>
-              </li>
-            ))}
-          </ol>
-        </section>
-      </main>
-    </>
-  );
+  return <HomeView t={t} name={user.name} mine={mine} templates={templates} active={active} />;
 }

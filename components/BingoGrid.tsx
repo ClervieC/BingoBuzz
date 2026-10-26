@@ -18,6 +18,7 @@ export function BingoGrid({
   readOnly = false,
   highlightWins = true,
   compact = false,
+  pending,
 }: {
   grid: Cell[];
   checked: boolean[];
@@ -26,6 +27,8 @@ export function BingoGrid({
   highlightWins?: boolean;
   /** grille d'aperçu (pas de contrainte de hauteur d'écran) */
   compact?: boolean;
+  /** index des cases proposées en attente de confirmation (mode « peer ») */
+  pending?: ReadonlySet<number>;
 }) {
   const t = useT();
   const size = sizeFromLength(grid.length);
@@ -58,6 +61,7 @@ export function BingoGrid({
             index={i}
             checked={Boolean(checked[i])}
             winning={winning.has(i)}
+            pending={pending?.has(i)}
             readOnly={readOnly}
             onToggle={onToggle}
             onLongPress={openDetail}

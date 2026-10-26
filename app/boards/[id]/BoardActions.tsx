@@ -7,7 +7,7 @@ import { BottomSheet } from "@/components/BottomSheet";
 import { useT } from "@/components/I18nProvider";
 import { Icon } from "@/components/Icon";
 import { useToast } from "@/components/Toast";
-import { ensureSession } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { errorKey } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { GameMode } from "@/types/bingo";
@@ -16,11 +16,14 @@ export function BoardActions({
   boardId,
   title,
   isOwner,
+  locked = false,
   isTemplate,
 }: {
   boardId: string;
   title: string;
   isOwner: boolean;
+  /** une partie en cours a des joueurs : édition impossible */
+  locked?: boolean;
   isTemplate: boolean;
 }) {
   const t = useT();
@@ -33,7 +36,7 @@ export function BoardActions({
   async function createGame() {
     setBusy("game");
     try {
-      await ensureSession();
+      await requireUser();
       const { data, error } = await getSupabaseBrowserClient().rpc("create_game", {
         p_board_id: boardId,
         p_mode: mode,
@@ -49,7 +52,7 @@ export function BoardActions({
   async function duplicate() {
     setBusy("duplicate");
     try {
-      await ensureSession();
+      await requireUser();
       const { data: id, error } = await getSupabaseBrowserClient().rpc("duplicate_board", {
         p_id: boardId,
         p_title: isTemplate ? title : `${title} ${t("library.copySuffix")}`,
@@ -79,42 +82,84 @@ export function BoardActions({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setSheet(true)}
-        className="card flex items-center gap-4 p-4 text-left active:scale-[0.99]"
-      >
-        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-accent text-accent-fg">
-          <Icon name="users" />
-        </span>
-        <span className="min-w-0">
-          <span className="block font-bold">{t("board.createGame")}</span>
-          <span className="block text-sm text-muted">{t("board.createGame.hint")}</span>
-        </span>
-      </button>
-
-      <div className="flex flex-wrap gap-2 pt-1">
-        {isOwner && (
-          <Link href={`/boards/${boardId}/edit`} className="btn btn-ghost btn-sm">
-            <Icon name="edit" size={20} />
-            {t("common.edit")}
-          </Link>
-        )}
-        <button type="button" className="btn btn-ghost btn-sm" onClick={duplicate} disabled={busy !== null}>
-          <Icon name="copy" size={20} />
-          {isTemplate ? t("board.useTemplate") : t("common.duplicate")}
+      <div className="grid gap-3">
+        {/* action principale */}
+        <button
+          type="button"
+          onClick={() => setSheet(true)}
+          className="wiggle-parent lift flex items-center gap-4 rounded-3xl bg-accent p-5 text-left text-accent-fg shadow-lg shadow-violet-900/20 transition active:scale-[0.98]"
+        >
+          <span className="wiggle grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/20 text-3xl">
+            🎉
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-lg font-black">{t("board.createGame")}</span>
+            <span className="block text-sm opacity-85">{t("board.createGame.hint")}</span>
+          </span>
+          <Icon name="back" className="shrink-0 rotate-180" />
         </button>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Link
+            href={`/solo/${boardId}`}
+            className="card wiggle-parent lift flex flex-col gap-2 p-4 transition active:scale-[0.97]"
+          >
+            <span className="wiggle grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-accent">
+              <Icon name="play" />
+            </span>
+            <span className="font-extrabold">{t("board.playSolo")}</span>
+            <span className="text-xs text-muted">{t("board.playSolo.hint")}</span>
+          </Link>
+
+          {isOwner && !locked ? (
+            <Link
+              href={`/boards/${boardId}/edit`}
+              className="card wiggle-parent lift flex flex-col gap-2 p-4 transition active:scale-[0.97]"
+            >
+              <span className="wiggle grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Icon name="edit" />
+              </span>
+              <span className="font-extrabold">{t("common.edit")}</span>
+              <span className="text-xs text-muted">{t("game.host.edit.hint")}</span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={duplicate}
+              disabled={busy !== null}
+              className="card wiggle-parent lift flex flex-col gap-2 p-4 text-left transition active:scale-[0.97]"
+            >
+              <span className="wiggle grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Icon name="copy" />
+              </span>
+              <span className="font-extrabold">{isTemplate ? t("board.useTemplate") : t("common.duplicate")}</span>
+              <span className="text-xs text-muted">{t("library.templates.hint")}</span>
+            </button>
+          )}
+        </div>
+
+        {isOwner && locked && <p className="rounded-2xl bg-surface-2 p-3 text-sm text-muted">{t("board.locked")}</p>}
+
+        {/* actions secondaires */}
         {isOwner && (
-          <button type="button" className="btn btn-danger btn-sm" onClick={remove} disabled={busy !== null}>
-            <Icon name="trash" size={20} />
-            {t("common.delete")}
-          </button>
+          <div className="flex flex-wrap justify-center gap-2" aria-label={t("board.more")}>
+            {!locked && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={duplicate} disabled={busy !== null}>
+                <Icon name="copy" size={18} />
+                {t("common.duplicate")}
+              </button>
+            )}
+            <button type="button" className="btn btn-danger btn-sm" onClick={remove} disabled={busy !== null}>
+              <Icon name="trash" size={18} />
+              {t("common.delete")}
+            </button>
+          </div>
         )}
       </div>
 
       <BottomSheet open={sheet} onClose={() => setSheet(false)} title={t("board.mode")}>
         <div className="space-y-3" role="radiogroup" aria-label={t("board.mode")}>
-          {(["free", "validated"] as const).map((m) => (
+          {(["free", "peer", "validated"] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -134,10 +179,8 @@ export function BoardActions({
                 {mode === m && <Icon name="check" size={14} strokeWidth={3} />}
               </span>
               <span>
-                <span className="block font-bold">{t(m === "free" ? "board.mode.free" : "board.mode.validated")}</span>
-                <span className="block text-sm text-muted">
-                  {t(m === "free" ? "board.mode.free.hint" : "board.mode.validated.hint")}
-                </span>
+                <span className="block font-bold">{t(`board.mode.${m}`)}</span>
+                <span className="block text-sm text-muted">{t(`board.mode.${m}.hint`)}</span>
               </span>
             </button>
           ))}

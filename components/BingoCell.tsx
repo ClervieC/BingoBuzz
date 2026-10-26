@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { useFitText } from "@/hooks/useFitText";
 import { useLongPress } from "@/hooks/useLongPress";
+import { frenchSpacing } from "@/lib/phrases";
 import type { Cell } from "@/types/bingo";
 import { useT } from "./I18nProvider";
 
@@ -11,6 +12,8 @@ interface BingoCellProps {
   index: number;
   checked: boolean;
   winning: boolean;
+  /** proposée, en attente de confirmation (mode « peer ») */
+  pending?: boolean;
   readOnly: boolean;
   onToggle?: (index: number) => void;
   onLongPress?: (index: number) => void;
@@ -21,12 +24,13 @@ export const BingoCell = memo(function BingoCell({
   index,
   checked,
   winning,
+  pending = false,
   readOnly,
   onToggle,
   onLongPress,
 }: BingoCellProps) {
   const t = useT();
-  const label = cell.free ? t("grid.free") : cell.text;
+  const label = cell.free ? t("grid.free") : frenchSpacing(cell.text);
   const { boxRef, textRef } = useFitText<HTMLDivElement, HTMLDivElement>(label, {
     min: 9,
     max: cell.free ? 18 : 22,
@@ -64,7 +68,9 @@ export const BingoCell = memo(function BingoCell({
           ? "border-transparent bg-accent text-accent-fg"
           : checked
             ? "border-accent/50 bg-accent-soft text-fg"
-            : "border-border bg-surface text-fg active:bg-surface-2",
+            : pending
+              ? "border-2 border-dashed border-accent bg-surface text-fg"
+              : "border-border bg-surface text-fg shadow-sm shadow-violet-900/5 active:bg-surface-2",
         winning ? "animate-win border-gold" : "",
         justChanged ? "animate-pop" : "",
         readOnly ? "cursor-default" : "",
@@ -75,6 +81,11 @@ export const BingoCell = memo(function BingoCell({
           aria-hidden
           className={`pointer-events-none absolute inset-0 m-auto aspect-square w-[78%] rounded-full border-[3px] border-accent/45 bg-accent/10 ${justChanged ? "animate-stamp" : "-rotate-6"}`}
         />
+      )}
+      {pending && !checked && (
+        <span aria-hidden className="absolute top-0.5 right-0.5 animate-pulse text-[11px] leading-none">
+          ⏳
+        </span>
       )}
       <div ref={boxRef} className="absolute inset-[5px] flex items-center justify-center">
         <div ref={textRef} lang="fr" className="bingo-cell-text relative w-full">

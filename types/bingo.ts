@@ -1,5 +1,7 @@
 export type GridSize = 3 | 4 | 5;
-export type GameMode = "free" | "validated";
+/** free : chacun coche ; validated : l’hôte valide ; peer : un autre joueur confirme */
+export type GameMode = "free" | "validated" | "peer";
+export type ClaimStatus = "pending" | "confirmed" | "rejected";
 export type GameStatus = "playing" | "finished";
 
 export interface BoardTheme {
@@ -76,6 +78,20 @@ export interface GameEvent {
   phrase_id: string;
   validated_by: string;
   created_at: string;
+}
+
+/** Proposition d’un joueur (mode « peer »), confirmée ou contestée par un autre. */
+export interface GameClaim {
+  id: string;
+  game_id: string;
+  phrase_id: string;
+  claimed_by: string;
+  status: ClaimStatus;
+  resolved_by: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  /** preuve photo facultative : chemin dans le bucket privé « proofs » */
+  photo_path: string | null;
 }
 
 export interface PublicGame {

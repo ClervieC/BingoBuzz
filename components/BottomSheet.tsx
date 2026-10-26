@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "./I18nProvider";
 import { Icon } from "./Icon";
@@ -26,6 +26,9 @@ export function BottomSheet({
   const dragStart = useRef<number | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // le portail n'existe que côté client : rien avant le montage (pas d'écart d'hydratation)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!open) return;
@@ -44,7 +47,7 @@ export function BottomSheet({
     };
   }, [open]);
 
-  if (!open || typeof document === "undefined") return null;
+  if (!open || !mounted) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">

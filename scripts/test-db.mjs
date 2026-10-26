@@ -29,7 +29,11 @@ await db.exec(`
   create role anon nologin;
   create role authenticated nologin;
   create schema auth;
-  create table auth.users (id uuid primary key, email text);
+  create table auth.users (
+    id uuid primary key, email text,
+    created_at timestamptz default now(), last_sign_in_at timestamptz,
+    raw_app_meta_data jsonb default '{"providers":["email"]}', raw_user_meta_data jsonb default '{}'
+  );
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   grant usage on schema auth to anon, authenticated;
@@ -37,6 +41,22 @@ await db.exec(`
   create schema extensions;
   grant usage on schema extensions to anon, authenticated;
   create publication supabase_realtime;
+
+  -- Storage : le strict nécessaire pour les policies du bucket « proofs »
+  create schema storage;
+  grant usage on schema storage to anon, authenticated;
+  create table storage.buckets (
+    id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]
+  );
+  create table storage.objects (
+    id uuid primary key default gen_random_uuid(), bucket_id text, name text,
+    owner uuid default auth.uid()
+  );
+  alter table storage.objects enable row level security;
+  grant select, insert, delete on storage.objects to authenticated;
+  create function storage.foldername(name text) returns text[] language sql immutable as
+    $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+  grant execute on function storage.foldername(text) to anon, authenticated;
 `);
 
 // --- migrations -------------------------------------------------------------
@@ -131,8 +151,20 @@ await as(A);
 const [game] = await q("select * from public.create_game($1, 'free')", [boardId]);
 ok(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/.test(game.code), `create_game → code ${game.code}`);
 
+// verrou : modifiable tant qu'aucun joueur n'a rejoint
+const editPhrases = ["Trois", "Un", "Deux", "Quatre", "Cinq", "Six", "Sept", "Huit", "Onze", "Douze"];
+const saveEdit = () =>
+  q("select public.save_board($1, 'Test 2', '{\"emoji\":\"🎉\",\"color\":\"blue\"}', 3, true, $2)", [boardId, editPhrases]);
+ok((await q("select public.board_locked($1) as l", [boardId]))[0].l === false, "partie créée sans joueur : bingo non verrouillé");
+await saveEdit();
+ok((await q("select count(*)::int as n from public.board_phrases where board_id = $1", [boardId]))[0].n === 10, "l'hôte ajoute des phrases avant l'arrivée des joueurs");
+
 await as(B);
 const [pb] = await q("select * from public.join_game($1, 'Bob')", [game.code.toLowerCase()]);
+await as(A);
+ok((await q("select public.board_locked($1) as l", [boardId]))[0].l === true, "un joueur a rejoint : bingo verrouillé");
+await expectError(saveEdit(), /board_locked/, "save_board refuse de modifier un bingo verrouillé");
+await as(B);
 ok(pb.grid.length === 9 && pb.grid[4].free === true && pb.checked[4] === true, "join_game : grille 3×3, centre libre coché");
 ok(new Set(pb.grid.filter((c) => !c.free).map((c) => c.id)).size === 8, "8 phrases distinctes");
 const [pb2] = await q("select * from public.join_game($1, 'Bobby')", [game.code]);
@@ -185,6 +217,7 @@ ok((await q("select status from public.games where id = $1", [game.id]))[0].stat
 await as(A);
 const [ended] = await q("update public.games set status = 'finished' where id = $1 returning ended_at", [game.id]);
 ok(ended.ended_at !== null, "l'hôte termine la partie (ended_at)");
+ok((await q("select public.board_locked($1) as l", [boardId]))[0].l === false, "partie terminée : bingo de nouveau modifiable");
 await as(B);
 await expectError(
   q("update public.game_players set checked = $1 where id = $2", [JSON.stringify(row0), pb.id]),
@@ -235,6 +268,102 @@ await expectError(
   "l'hôte ne peut valider qu'une phrase de ce bingo",
 );
 
+// un bingo ne se joue qu'une fois à la fois : relancer renvoie la partie en cours
+const [again] = await q("select * from public.create_game($1, 'free')", [boardId]);
+ok(again.id === vgame.id && again.mode === "validated", "relancer un bingo en cours renvoie la même partie");
+await q("update public.games set status = 'finished' where id = $1", [vgame.id]);
+const [afterEnd] = await q("select * from public.create_game($1, 'free')", [boardId]);
+ok(afterEnd.id !== vgame.id, "une fois la partie terminée, on peut en relancer une");
+await q("update public.games set status = 'finished' where id = $1", [afterEnd.id]);
+
+// --- partie validée par le groupe (peer) ------------------------------------------
+console.log("\nPartie validée par le groupe");
+await as(A);
+const [peer] = await q("select * from public.create_game($1, 'peer')", [boardId]);
+await as(B);
+const [peerB] = await q("select * from public.join_game($1, 'Bob')", [peer.code]);
+await as(C);
+const [peerC] = await q("select * from public.join_game($1, 'Chloé')", [peer.code]);
+const shared = peerB.grid.find((c) => !c.free && peerC.grid.some((d) => d.id === c.id));
+const onlyB = peerB.grid.filter((c) => !c.free && c.id !== shared.id);
+const notInB = (await q("select id from public.board_phrases where board_id = $1", [boardId])).find(
+  (p) => !peerB.grid.some((c) => c.id === p.id),
+);
+
+await as(B);
+const [claim1] = await q("select * from public.claim_phrase($1, $2)", [peer.id, shared.id]);
+ok(claim1.status === "pending", "un joueur propose une phrase de sa grille");
+await expectError(q("select * from public.claim_phrase($1, $2)", [peer.id, shared.id]), /claim_exists/, "une seule proposition en attente par phrase");
+await expectError(q("select * from public.claim_phrase($1, $2)", [peer.id, notInB.id]), /not_in_grid/, "on ne propose que les phrases de sa grille");
+await expectError(
+  q("update public.game_players set checked = $1 where id = $2", [JSON.stringify(peerB.checked.map(() => true)), peerB.id]),
+  /validated_mode/,
+  "en mode groupe, pas de coche directe",
+);
+await expectError(q("select * from public.resolve_claim($1, true)", [claim1.id]), /own_claim/, "on ne confirme pas sa propre proposition");
+
+await as(D);
+await expectError(q("select * from public.resolve_claim($1, true)", [claim1.id]), /not_member|claim_not_found/, "un non-membre ne peut pas confirmer");
+ok((await q("select * from public.game_claims where game_id = $1", [peer.id])).length === 0, "un non-membre ne voit pas les propositions");
+
+await as(C);
+ok((await q("select * from public.game_claims where game_id = $1", [peer.id])).length === 1, "les joueurs voient les propositions");
+const [confirmed] = await q("select * from public.resolve_claim($1, true)", [claim1.id]);
+ok(confirmed.status === "confirmed" && confirmed.resolved_by === C, "un autre joueur confirme");
+const idxB = peerB.grid.findIndex((c) => c.id === shared.id);
+const idxC = peerC.grid.findIndex((c) => c.id === shared.id);
+const [bAfter] = await q("select checked from public.game_players where id = $1", [peerB.id]);
+const [cAfter] = await q("select checked from public.game_players where id = $1", [peerC.id]);
+ok(bAfter.checked[idxB] === true && cAfter.checked[idxC] === true, "confirmée → cochée chez tous ceux qui l'ont");
+
+await as(B);
+await expectError(q("select * from public.claim_phrase($1, $2)", [peer.id, shared.id]), /already_validated/, "une phrase déjà validée ne se repropose pas");
+const [claim2] = await q("select * from public.claim_phrase($1, $2)", [peer.id, onlyB[0].id]);
+await as(C);
+const [rejected] = await q("select * from public.resolve_claim($1, false)", [claim2.id]);
+const idx2 = peerB.grid.findIndex((c) => c.id === onlyB[0].id);
+await as(B);
+const [bAfter2] = await q("select checked from public.game_players where id = $1", [peerB.id]);
+ok(rejected.status === "rejected" && bAfter2.checked[idx2] === false, "contestée → rien n'est coché");
+const [claim3] = await q("select * from public.claim_phrase($1, $2)", [peer.id, onlyB[0].id]);
+ok(claim3.status === "pending", "une phrase contestée peut être reproposée");
+const [cancelled] = await q("select * from public.resolve_claim($1, false)", [claim3.id]);
+ok(cancelled.status === "rejected", "l'auteur peut annuler sa proposition");
+
+// preuve photo (optionnelle) : bucket privé, dossier <partie>/<joueur>/
+const photoPath = `${peer.id}/${B}/preuve.jpg`;
+await q("insert into storage.objects (bucket_id, name) values ('proofs', $1)", [photoPath]);
+ok(true, "un joueur dépose une photo dans son dossier");
+await expectError(
+  q("insert into storage.objects (bucket_id, name) values ('proofs', $1)", [`${peer.id}/${C}/triche.jpg`]),
+  /row-level security/,
+  "impossible de déposer dans le dossier d'un autre",
+);
+const [withPhoto] = await q("select * from public.claim_phrase($1, $2, $3)", [peer.id, onlyB[1].id, photoPath]);
+ok(withPhoto.photo_path === photoPath, "proposition avec photo");
+await expectError(
+  q("select * from public.claim_phrase($1, $2, $3)", [peer.id, onlyB[2].id, `${peer.id}/${C}/x.jpg`]),
+  /invalid_photo/,
+  "la photo doit venir du dossier de l'auteur",
+);
+await as(C);
+ok((await q("select name from storage.objects where bucket_id = 'proofs'")).length === 1, "les joueurs de la partie voient la photo");
+await as(D);
+ok((await q("select name from storage.objects where bucket_id = 'proofs'")).length === 0, "un non-membre ne voit pas la photo");
+await as(B);
+await q("select * from public.resolve_claim($1, false)", [withPhoto.id]);
+
+await as(A);
+await q("update public.games set status = 'finished' where id = $1", [peer.id]);
+const [freeGame] = await q("select * from public.create_game($1, 'free')", [boardId]);
+await as(B);
+const [freeB] = await q("select * from public.join_game($1, 'Bob')", [freeGame.code]);
+await expectError(
+  q("select * from public.claim_phrase($1, $2)", [freeGame.id, freeB.grid.find((c) => !c.free).id]),
+  /wrong_mode/,
+  "les propositions n'existent qu'en mode groupe",
+);
+
 // --- anonyme / modèles -----------------------------------------------------------
 console.log("\nAccès public et modèles");
 await as("anon");
@@ -256,6 +385,44 @@ await as(A);
 await q("delete from public.boards where id = $1", [boardId]);
 await as(A);
 ok((await q("select * from public.games where board_id = $1", [boardId])).length === 0, "supprimer un bingo supprime ses parties");
+
+// --- RGPD : export et suppression du compte ----------------------------------------
+console.log("\nRGPD");
+await as(B);
+const [bJoin] = await q("select * from public.join_game($1, 'Bob')", [tg.code]);
+await as(C);
+await q("select * from public.join_game($1, 'Chloé')", [tg.code]);
+const [{ data: exported }] = await q("select public.export_my_data() as data");
+ok(exported.account.id === C, "export_my_data : identité du compte");
+ok(exported.boards.length === 1 && exported.boards[0].phrases.length > 0, "export_my_data : bingos avec leurs phrases");
+ok(exported.hosted_games.length === 1 && exported.hosted_games[0].code === tg.code, "export_my_data : parties animées");
+ok(
+  exported.participations.length === 1 && exported.participations[0].nickname === "Chloé" && exported.participations[0].grid.length === 16,
+  "export_my_data : participations avec la grille",
+);
+await as(B);
+const [{ data: exportedB }] = await q("select public.export_my_data() as data");
+ok(!JSON.stringify(exportedB).includes(dup), "export_my_data ne contient pas les données des autres");
+await as("anon");
+await expectError(q("select public.export_my_data()"), /permission denied/, "anon ne peut pas exporter");
+await expectError(q("select public.delete_my_account()"), /permission denied/, "anon ne peut pas supprimer de compte");
+
+await as(C);
+await q("select public.delete_my_account()");
+await db.exec("reset role");
+const left = await q(
+  `select (select count(*)::int from auth.users where id = $1) as users,
+          (select count(*)::int from public.boards where owner_id = $1) as boards,
+          (select count(*)::int from public.games where host_id = $1) as games,
+          (select count(*)::int from public.game_players where user_id = $1) as players,
+          (select count(*)::int from public.game_players where id = $2) as guest_in_deleted_game`,
+  [C, bJoin.id],
+);
+ok(
+  Object.values(left[0]).every((n) => n === 0),
+  `delete_my_account efface compte, bingos, parties animées, participations ${JSON.stringify(left[0])}`,
+);
+ok((await q("select count(*)::int as n from auth.users where id = $1", [B]))[0].n === 1, "les autres comptes sont intacts");
 
 console.log(`\n${passed} réussis, ${failed} échoués`);
 process.exit(failed ? 1 : 0);

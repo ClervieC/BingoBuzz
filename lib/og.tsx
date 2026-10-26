@@ -1,10 +1,20 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { THEME_COLORS } from "@/lib/themes";
 import type { ThemeColor } from "@/types/bingo";
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
-/** Mini-grille décorative ; les cases « cochées » forment une diagonale. */
+/** Logo (version texte clair, pour fond sombre) en data URL, lu une seule fois. */
+const brand = (async () => {
+  const read = async (file: string) =>
+    `data:image/png;base64,${(await readFile(join(process.cwd(), "public/brand", file))).toString("base64")}`;
+  const [icon, wordmark, logo] = await Promise.all([read("icon.png"), read("wordmark-dark.png"), read("logo-dark.png")]);
+  return { icon, wordmark, logo };
+})();
+
+/** Mini-grille décorative ; les cases « cochées » forment des diagonales. */
 function DecorGrid({ accent, cell }: { accent: string; cell: number }) {
   const size = 5;
   const checked = new Set([0, 6, 12, 18, 24, 3, 9, 15]);
@@ -33,7 +43,7 @@ function DecorGrid({ accent, cell }: { accent: string; cell: number }) {
   );
 }
 
-export function renderGameOg({
+export async function renderGameOg({
   title,
   emoji,
   color,
@@ -51,6 +61,7 @@ export function renderGameOg({
   playersLabel: string;
 }) {
   const palette = THEME_COLORS[color];
+  const { icon, wordmark } = await brand;
   return new ImageResponse(
     (
       <div
@@ -65,8 +76,11 @@ export function renderGameOg({
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", flex: 1, justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 34, fontWeight: 800, opacity: 0.9 }}>
-            BingoBuzz
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={icon} width={64} height={64} alt="" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={wordmark} height={44} width={220} alt="bingoBuzz" />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
             <div style={{ fontSize: 110, lineHeight: 1 }}>{emoji}</div>
@@ -98,7 +112,9 @@ export function renderGameOg({
             >
               {code}
             </div>
-            <div style={{ display: "flex", fontSize: 30, opacity: 0.85 }}>{playersLabel.replace("{count}", String(players))}</div>
+            <div style={{ display: "flex", fontSize: 30, opacity: 0.85 }}>
+              {playersLabel.replace("{count}", String(players))}
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center" }}>
@@ -110,8 +126,9 @@ export function renderGameOg({
   );
 }
 
-export function renderDefaultOg({ tagline }: { tagline: string }) {
+export async function renderDefaultOg({ tagline }: { tagline: string }) {
   const palette = THEME_COLORS.violet;
+  const { logo } = await brand;
   return new ImageResponse(
     (
       <div
@@ -127,52 +144,14 @@ export function renderDefaultOg({ tagline }: { tagline: string }) {
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 600 }}>
-          <div style={{ fontSize: 96, fontWeight: 900, display: "flex" }}>BingoBuzz</div>
-          <div style={{ fontSize: 44, lineHeight: 1.2, opacity: 0.9, display: "flex" }}>{tagline}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 560 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logo} width={420} height={332} alt="bingoBuzz" />
+          <div style={{ fontSize: 40, lineHeight: 1.2, opacity: 0.92, display: "flex" }}>{tagline}</div>
         </div>
         <DecorGrid accent={palette.dark} cell={76} />
       </div>
     ),
     { ...OG_SIZE, emoji: "twemoji" },
-  );
-}
-
-/** Icône de l'application (PWA, Apple touch icon). `maskable` : zone de sécurité de 20 %. */
-export function renderAppIcon(size: number, { maskable = false }: { maskable?: boolean } = {}) {
-  const accent = THEME_COLORS.violet.light;
-  const inner = maskable ? size * 0.6 : size * 0.72;
-  const gap = inner * 0.06;
-  const cell = (inner - gap * 2) / 3;
-  const checked = new Set([0, 4, 8]);
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: accent,
-          borderRadius: maskable ? 0 : size * 0.22,
-        }}
-      >
-        <div style={{ display: "flex", flexWrap: "wrap", width: inner, height: inner, gap }}>
-          {Array.from({ length: 9 }, (_, i) => (
-            <div
-              key={i}
-              style={{
-                width: cell,
-                height: cell,
-                borderRadius: cell * 0.24,
-                background: checked.has(i) ? "#fbbf24" : "rgba(255,255,255,0.95)",
-              }}
-            />
-          ))}
-        </div>
-      </div>
-    ),
-    { width: size, height: size },
   );
 }

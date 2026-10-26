@@ -8,6 +8,15 @@ const KNOWN = [
   "invalid_nickname",
   "board_not_found",
   "not_authenticated",
+  "board_locked",
+  "claim_exists",
+  "not_in_grid",
+  "already_validated",
+  "own_claim",
+  "wrong_mode",
+  "claim_not_found",
+  "not_member",
+  "invalid_photo",
 ] as const;
 
 /**

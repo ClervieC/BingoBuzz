@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { BingoGrid } from "@/components/BingoGrid";
 import { BottomSheet } from "@/components/BottomSheet";
-import { ExportImageButton } from "@/components/ExportImageButton";
-import { GridFrame } from "@/components/GridFrame";
+import { ClaimsPanel } from "@/components/ClaimsPanel";
 import { HostPanel } from "@/components/HostPanel";
 import { useT } from "@/components/I18nProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { JoinForm } from "@/components/JoinForm";
+import { ProofGallery } from "@/components/ProofGallery";
+import { ProgressRing } from "@/components/ProgressRing";
+import { ProposeSheet } from "@/components/ProposeSheet";
 import { Leaderboard, rankPlayers } from "@/components/Leaderboard";
 import { SharePanel } from "@/components/SharePanel";
 import { useToast } from "@/components/Toast";
@@ -20,41 +22,71 @@ import { fireConfetti } from "@/lib/confetti";
 import { haptics } from "@/lib/haptics";
 import type { MessageKey } from "@/lib/i18n";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
-import { themeStyle } from "@/lib/themes";
-import type { GamePlayer, PublicGame } from "@/types/bingo";
+import { THEME_COLORS, themeStyle } from "@/lib/themes";
+import type { GameMode, GamePlayer, PublicGame } from "@/types/bingo";
 
-type Tab = "grid" | "ranking" | "host" | "invite";
+type Tab = "grid" | "ranking" | "photos" | "host" | "invite";
 
 const TAB_META: Record<Tab, { icon: IconName; label: MessageKey }> = {
   grid: { icon: "grid", label: "game.tabs.grid" },
   ranking: { icon: "trophy", label: "game.tabs.ranking" },
-  host: { icon: "megaphone", label: "game.tabs.host" },
+  host: { icon: "settings", label: "game.tabs.host" },
+  photos: { icon: "image", label: "game.tabs.photos" },
   invite: { icon: "share", label: "game.tabs.invite" },
+};
+
+const MODE_LABEL: Record<GameMode, MessageKey> = {
+  free: "game.mode.free",
+  validated: "game.mode.validated",
+  peer: "game.mode.peer",
+};
+const MODE_HINT: Record<GameMode, MessageKey> = {
+  free: "grid.longPressHint",
+  validated: "game.validated.hint",
+  peer: "game.peer.hint",
 };
 
 export function GameClient({ publicGame }: { publicGame: PublicGame }) {
   const t = useT();
   const toast = useToast();
   const g = useGame(publicGame);
-  const frameRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab | null>(null);
   const [viewedId, setViewedId] = useState<string | null>(null);
   const [victory, setVictory] = useState<VictoryKind | null>(null);
+  // mode groupe : case dont on prépare la proposition (fenêtre « J'ai vu ça ! »)
+  const [proposing, setProposing] = useState<number | null>(null);
 
   const title = publicGame.title;
   const theme = publicGame.theme;
+  const palette = THEME_COLORS[theme.color];
   const finished = g.game?.status === "finished";
-  const mode = g.game?.mode ?? publicGame.mode;
+  const mode: GameMode = g.game?.mode ?? publicGame.mode;
 
   // ---- onglets disponibles ------------------------------------------------
   const tabs = useMemo<Tab[]>(() => {
     const list: Tab[] = [];
     if (g.me) list.push("grid");
+    list.push("ranking");
+    // galerie des preuves : seulement en mode « validé par le groupe »
+    if ((g.game?.mode ?? publicGame.mode) === "peer") list.push("photos");
     if (g.isHost) list.push("host");
-    list.push("ranking", "invite");
+    list.push("invite");
     return list;
-  }, [g.me, g.isHost]);
-  const activeTab: Tab = tab && tabs.includes(tab) ? tab : tabs[0];
+  }, [g.me, g.isHost, g.game?.mode, publicGame.mode]);
+  const activeTab: Tab = tab && tabs.includes(tab) ? tab : g.me ? "grid" : g.isHost ? "host" : tabs[0];
+
+  // texte d'une phrase (bingo chargé, sinon grilles des joueurs)
+  const phraseText = useCallback(
+    (id: string) =>
+      g.board?.phrases.find((p) => p.id === id)?.text ??
+      g.players.flatMap((p) => p.grid).find((c) => c.id === id)?.text ??
+      "…",
+    [g.board, g.players],
+  );
+  const nameOf = useCallback(
+    (uid: string | null) => g.players.find((p) => p.user_id === uid)?.nickname ?? "?",
+    [g.players],
+  );
 
   // ---- alerte quand un autre joueur fait BINGO ----------------------------
   const { notice } = g;
@@ -69,7 +101,27 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     });
   }, [notice, toast, t]);
 
-  // ---- ma victoire (aussi en mode validé, quand l'hôte coche pour moi) -----
+  // ---- mode groupe : nouvelle proposition / ma proposition traitée --------
+  const { claimNotice, resolveClaim } = g;
+  useEffect(() => {
+    if (!claimNotice) return;
+    const { claim, kind } = claimNotice;
+    const text = phraseText(claim.phrase_id);
+    if (kind === "new") {
+      haptics.alert();
+      toast.show(t("game.peer.toast", { name: nameOf(claim.claimed_by), text }), {
+        duration: 8000,
+        action: { label: t("game.peer.confirm"), onClick: () => void resolveClaim(claim.id, true) },
+      });
+    } else if (kind === "confirmed") {
+      toast.show(t("game.peer.confirmed", { text, name: nameOf(claim.resolved_by) }), { tone: "success" });
+    } else {
+      toast.show(t("game.peer.rejected", { text, name: nameOf(claim.resolved_by) }), { tone: "error" });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- une notification par événement
+  }, [claimNotice]);
+
+  // ---- ma victoire (aussi en modes validés, quand d'autres cochent pour moi) --
   const myChecked = g.me?.checked;
   const myGridLength = g.me?.grid.length;
   const gameId = g.game?.id;
@@ -89,18 +141,46 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
   const viewed: GamePlayer | null = viewedId ? (g.players.find((p) => p.id === viewedId) ?? null) : null;
   const winners = useMemo(() => rankPlayers(g.players).filter((r) => r.bingo), [g.players]);
 
+  // cases de ma grille proposées et en attente (mode groupe)
+  const me = g.me;
+  const pendingCells = useMemo(() => {
+    const set = new Set<number>();
+    if (!me) return set;
+    for (const claim of g.claims) {
+      if (claim.status !== "pending") continue;
+      const index = me.grid.findIndex((c) => c.id === claim.phrase_id);
+      if (index >= 0) set.add(index);
+    }
+    return set;
+  }, [g.claims, me]);
+  const toConfirmCount = g.claims.filter((c) => c.status === "pending" && c.claimed_by !== g.userId).length;
+
+  /** Toucher une case : coche (mode libre) ; proposition ou annulation (mode groupe). */
+  const { toggle, cancelClaim, proposeClaim } = g;
+  const onCellTap = useCallback(
+    (index: number) => {
+      if (mode !== "peer") {
+        toggle(index);
+        return;
+      }
+      if (!me || me.checked[index] || !me.grid[index]?.id) return;
+      const pendingClaim = g.claims.find((c) => c.status === "pending" && c.phrase_id === me.grid[index].id);
+      if (pendingClaim) {
+        // ma proposition : je l'annule ; celle d'un autre : à confirmer dans le panneau
+        if (pendingClaim.claimed_by === g.userId) void cancelClaim(pendingClaim);
+        return;
+      }
+      setProposing(index);
+    },
+    [mode, toggle, me, g.claims, g.userId, cancelClaim],
+  );
+
   // ------------------------------------------------------------------------
 
   const header = (
     <AppHeader
       back="/"
       backLabel={t("common.home")}
-      title={
-        <span className="flex items-center gap-2">
-          <span aria-hidden>{theme.emoji}</span>
-          <span className="truncate">{title}</span>
-        </span>
-      }
       actions={
         g.phase === "ready" && activeTab !== "invite" ? (
           <button type="button" className="icon-btn" aria-label={t("game.tabs.invite")} onClick={() => setTab("invite")}>
@@ -111,12 +191,47 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     />
   );
 
+  /** Bandeau aux couleurs du bingo : emoji, titre, mode, code, joueurs en ligne. */
+  const banner = (
+    <section
+      className="relative overflow-hidden rounded-3xl p-4 text-white shadow-lg"
+      style={{ background: `linear-gradient(135deg, ${palette.light}, #1c1830)` }}
+    >
+      <span aria-hidden className="pointer-events-none absolute -top-4 -right-3 text-[5.5rem] leading-none opacity-15">
+        {theme.emoji}
+      </span>
+      <div className="relative flex items-center gap-3">
+        <span aria-hidden className="animate-bounce-in grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/15 text-3xl">
+          {theme.emoji}
+        </span>
+        <h1 className="min-w-0 flex-1 text-xl leading-tight font-black text-balance">{title}</h1>
+      </div>
+      <div className="relative mt-3 flex flex-wrap gap-2 text-xs font-bold">
+        <span className="rounded-full bg-white/15 px-2.5 py-1">{t(MODE_LABEL[mode])}</span>
+        <button
+          type="button"
+          onClick={() => setTab("invite")}
+          className="rounded-full bg-white/15 px-2.5 py-1 font-mono tracking-widest"
+          aria-label={t("game.tabs.invite")}
+        >
+          {publicGame.code}
+        </button>
+        {g.phase === "ready" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" aria-hidden />
+            {t("game.online", { count: g.online.size })}
+          </span>
+        )}
+      </div>
+    </section>
+  );
+
   if (g.phase === "loading") {
     return (
       <div className="themed min-h-dvh" style={themeStyle(theme)}>
         {header}
         <main className="page space-y-4 pt-4" aria-busy="true" aria-label={t("common.loading")}>
-          <div className="h-10 w-2/3 animate-pulse rounded-xl bg-surface-2" />
+          {banner}
           <div className="aspect-square w-full animate-pulse rounded-2xl bg-surface-2" />
         </main>
       </div>
@@ -141,29 +256,29 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     return (
       <div className="themed min-h-dvh" style={themeStyle(theme)}>
         {header}
-        <main className="page pb-safe space-y-6 pt-6">
-          <div className="text-center">
-            <span aria-hidden className="mx-auto grid h-20 w-20 place-items-center rounded-3xl bg-accent-soft text-5xl">
-              {theme.emoji}
-            </span>
-            <h1 className="mt-4 text-2xl font-black text-balance">{t("game.join.title", { title })}</h1>
-            <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm text-muted">
-              <span className="chip">{t(mode === "validated" ? "game.mode.validated" : "game.mode.free")}</span>
-              <span>
-                {publicGame.grid_size}×{publicGame.grid_size}
-              </span>
-              <span>·</span>
-              <span>{t("game.join.players", { count: publicGame.player_count })}</span>
-            </div>
-          </div>
+        <main className="page pb-safe stagger space-y-5 pt-4">
+          {banner}
           <div className="card p-5">
+            <h2 className="mb-1 text-lg font-black">{t("game.join.title", { title })}</h2>
+            <p className="mb-4 text-sm text-muted">
+              {publicGame.grid_size}×{publicGame.grid_size} · {t("game.join.players", { count: publicGame.player_count })}
+            </p>
             {publicGame.status === "finished" ? (
               <p className="text-center font-semibold text-muted">{t("game.finished")}</p>
+            ) : !g.userId ? (
+              // connexion obligatoire : retour automatique sur cette partie ensuite
+              <div className="space-y-3 text-center">
+                <p className="text-muted">{t("game.join.loginRequired")}</p>
+                <a href={`/?next=${encodeURIComponent(`/play/${publicGame.code}`)}`} className="btn btn-primary w-full">
+                  <Icon name="user" size={20} />
+                  {t("game.join.login")}
+                </a>
+              </div>
             ) : (
               <JoinForm onJoin={g.join} />
             )}
           </div>
-          {mode === "validated" && <p className="text-center text-sm text-muted">{t("game.validated.hint")}</p>}
+          {mode !== "free" && <p className="text-center text-sm text-muted">{t(MODE_HINT[mode])}</p>}
         </main>
       </div>
     );
@@ -171,9 +286,22 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
 
   // ---- partie en cours ----------------------------------------------------
 
-  const me = g.me;
   const size = me ? sizeFromLength(me.grid.length) : publicGame.grid_size;
   const missing = me ? cellsToBingo(me.checked, size) : size;
+  // message d'encouragement selon l'avancement
+  const myResult = me ? detectBingo(me.checked, size) : null;
+  const checkedCount = me ? countChecked(me.checked) : 0;
+  const status = finished
+    ? t("game.status.finished")
+    : myResult?.isFullCard
+      ? t("game.status.full")
+      : myResult?.hasBingo
+        ? t("game.status.bingo")
+        : missing === 1
+          ? t("game.status.one")
+          : checkedCount <= (me?.grid.some((c) => c.free) ? 1 : 0)
+            ? t("game.status.start")
+            : t("game.status.missing", { count: missing });
 
   return (
     <div className="themed min-h-dvh" style={themeStyle(theme)}>
@@ -185,14 +313,21 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
           className="sticky z-20 flex items-center justify-center gap-2 bg-surface-2 px-4 py-2 text-sm font-semibold"
           style={{ top: "calc(var(--safe-top) + 3.5rem)" }}
         >
-          <Icon name={g.connection === "offline" ? "wifiOff" : "refresh"} size={16} className={g.connection === "reconnecting" ? "animate-spin" : ""} />
+          <Icon
+            name={g.connection === "offline" ? "wifiOff" : "refresh"}
+            size={16}
+            className={g.connection === "reconnecting" ? "animate-spin" : ""}
+          />
           {g.connection === "offline" ? t("game.offline") : t("game.reconnecting")}
         </div>
       )}
 
-      <main className="page space-y-5 pt-4" style={{ paddingBottom: "calc(var(--safe-bottom) + 96px)" }}>
+      <main className="page space-y-4 pt-4" style={{ paddingBottom: "calc(var(--safe-bottom) + 104px)" }}>
+        {/* le bandeau (nom, mode, code) n'apparaît pas sur la grille : place au jeu */}
+        {activeTab !== "grid" && banner}
+
         {finished && (
-          <section className="card border-gold bg-gold/10 p-4 text-center">
+          <section className="animate-bounce-in card border-gold bg-gold/10 p-4 text-center">
             <p className="text-lg font-black">🏁 {t("game.ended.title")}</p>
             <p className="mt-1 text-muted">
               {winners.length > 0
@@ -204,43 +339,51 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
 
         {activeTab === "grid" && me && (
           <>
-            <GridFrame
-              ref={frameRef}
-              title={title}
-              theme={theme}
-              subtitle={
-                <span aria-live="polite">
-                  {countChecked(me.checked)} / {me.grid.length}
-                  {missing === 1 && !finished && (
-                    <span className="ml-2 font-bold text-accent">· {t("game.ranking.oneLeft")}</span>
-                  )}
-                </span>
-              }
-            >
+            {/* la carte de bingo : progression + message + grille */}
+            <section className="animate-rise rounded-[2rem] bg-gradient-to-b from-accent-soft to-surface p-3 shadow-lg shadow-violet-900/10 ring-1 ring-accent/15 sm:p-4">
+              <div aria-live="polite" className="flex items-center gap-3 px-1 pb-3">
+                <ProgressRing value={countChecked(me.checked)} total={me.grid.length} />
+                <p key={status} className={`animate-rise min-w-0 flex-1 leading-tight font-black ${missing <= 1 && !finished ? "text-accent" : ""}`}>
+                  {status}
+                </p>
+              </div>
               <BingoGrid
                 grid={me.grid}
                 checked={me.checked}
-                onToggle={g.toggle}
+                onToggle={onCellTap}
                 readOnly={mode === "validated" || finished}
+                pending={pendingCells}
               />
-            </GridFrame>
-            <p className="text-center text-sm text-muted">
-              {mode === "validated" ? t("game.validated.hint") : t("grid.longPressHint")}
+            </section>
+
+            {/* sous la grille : la grille ne bouge pas quand une proposition arrive ou part */}
+            {mode === "peer" && !finished && (
+              <ClaimsPanel
+                claims={g.claims}
+                players={g.players}
+                userId={g.userId}
+                phraseText={phraseText}
+                onResolve={(id, accept) => void resolveClaim(id, accept)}
+                onCancel={(claim) => void cancelClaim(claim)}
+              />
+            )}
+
+            <p className="mx-auto w-fit rounded-full bg-surface-2 px-3 py-1.5 text-center text-xs font-semibold text-muted">
+              💡 {t(MODE_HINT[mode])}
             </p>
-            <div className="flex justify-center gap-2">
-              <ExportImageButton targetRef={frameRef} title={title} />
-              {!g.isHost && (
+            {!g.isHost && (
+              <div className="flex justify-center">
                 <button
                   type="button"
-                  className="btn btn-ghost btn-sm text-muted"
+                  className="min-h-[44px] px-3 text-xs font-semibold text-muted underline-offset-2 hover:underline"
                   onClick={() => {
                     if (window.confirm(t("game.leave.confirm"))) void g.leave();
                   }}
                 >
                   {t("game.leave")}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
 
@@ -259,12 +402,33 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
 
         {activeTab === "host" && g.game && (
           <>
+            <p className="text-sm text-muted">{t("game.host.intro")}</p>
+            {mode === "peer" && !finished && (
+              <ClaimsPanel
+                claims={g.claims}
+                players={g.players}
+                userId={g.userId}
+                phraseText={phraseText}
+                onResolve={(id, accept) => void resolveClaim(id, accept)}
+                onCancel={(claim) => void cancelClaim(claim)}
+                showEmpty
+              />
+            )}
             <HostPanel
               game={g.game}
               board={g.board}
               validatedIds={g.validatedIds}
               onTogglePhrase={(id) => void g.togglePhrase(id)}
               onEnd={() => void g.endGame()}
+              edit={
+                g.board && g.board.owner_id === g.userId
+                  ? {
+                      href: `/boards/${g.board.id}/edit?next=${encodeURIComponent(`/play/${publicGame.code}`)}`,
+                      // même règle que la base : verrouillé dès qu’un joueur a rejoint
+                      locked: g.players.length > 0,
+                    }
+                  : undefined
+              }
             />
             {!me && !finished && (
               <section className="card p-5">
@@ -275,8 +439,12 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
           </>
         )}
 
+        {activeTab === "photos" && (
+          <ProofGallery claims={g.claims} players={g.players} phraseText={phraseText} />
+        )}
+
         {activeTab === "invite" && (
-          <section className="card p-5">
+          <section className="card animate-rise p-5">
             <h2 className="mb-4 text-center text-lg font-extrabold">{t("game.share.title")}</h2>
             <SharePanel code={publicGame.code} title={title} />
           </section>
@@ -288,21 +456,27 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         aria-label={title}
         className="pb-safe fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 backdrop-blur-md"
       >
-        <div className="page grid" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
+        <div className="page grid gap-1 pt-1.5" style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}>
           {tabs.map((id) => {
             const active = id === activeTab;
+            const badge = id === "grid" && mode === "peer" ? toConfirmCount : 0;
             return (
               <button
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-[56px] flex-col items-center justify-center gap-0.5 text-xs font-bold transition ${
-                  active ? "text-accent" : "text-muted"
+                className={`relative flex min-h-[54px] flex-col items-center justify-center gap-0.5 rounded-2xl text-xs font-bold transition active:scale-95 ${
+                  active ? "bg-accent-soft text-accent" : "text-muted"
                 }`}
               >
                 <Icon name={TAB_META[id].icon} size={22} />
                 {t(TAB_META[id].label)}
+                {badge > 0 && (
+                  <span className="animate-bounce-in absolute top-1 right-[calc(50%-22px)] grid h-5 min-w-5 place-items-center rounded-full bg-danger px-1 text-[11px] font-black text-on-status">
+                    {badge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -317,14 +491,13 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         {viewed && <BingoGrid grid={viewed.grid} checked={viewed.checked} readOnly compact />}
       </BottomSheet>
 
-      <VictoryOverlay kind={victory} onClose={() => setVictory(null)}>
-        <ExportImageButton
-          targetRef={frameRef}
-          title={title}
-          className="btn btn-secondary w-full"
-          label={t("victory.share")}
-        />
-      </VictoryOverlay>
+      <ProposeSheet
+        phrase={proposing !== null && me ? (me.grid[proposing]?.text ?? null) : null}
+        onClose={() => setProposing(null)}
+        onSubmit={(photo) => (proposing === null ? Promise.resolve(false) : proposeClaim(proposing, photo))}
+      />
+
+      <VictoryOverlay kind={victory} onClose={() => setVictory(null)} />
     </div>
   );
 }

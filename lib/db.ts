@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { cellsToBingo, countChecked, sizeFromLength } from "@/lib/bingo";
 import { normalizeTheme } from "@/lib/themes";
 import type { Board, BoardWithPhrases, PublicGame } from "@/types/bingo";
 import type { Database } from "@/types/database";
@@ -61,4 +62,55 @@ export async function fetchPublicGame(supabase: Client, code: string): Promise<P
 
 export function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+export interface ActiveGame {
+  code: string;
+  isHost: boolean;
+  title: string;
+  theme: Board["theme"];
+  createdAt: string;
+  /** progression du joueur courant (null s'il n'a pas de grille, ex. hôte qui ne joue pas) */
+  me: { count: number; total: number; missing: number; hasBingo: boolean } | null;
+}
+
+/**
+ * Parties en cours de l'utilisateur (hôte ou joueur), les plus récentes d'abord.
+ * La RLS ne renvoie que les parties dont il est membre.
+ */
+export async function fetchActiveGames(supabase: Client, userId: string): Promise<ActiveGame[]> {
+  const { data: games, error } = await supabase
+    .from("games")
+    .select("id, code, host_id, board_id, created_at")
+    .eq("status", "playing")
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (error) throw error;
+  if (!games?.length) return [];
+
+  const [{ data: boards }, { data: players }] = await Promise.all([
+    supabase.from("boards").select(BOARD_COLUMNS).in("id", [...new Set(games.map((g) => g.board_id))]),
+    supabase
+      .from("game_players")
+      .select("game_id, grid, checked, has_bingo")
+      .eq("user_id", userId)
+      .in("game_id", games.map((g) => g.id)),
+  ]);
+  const boardById = new Map((boards ?? []).map((b) => [b.id, toBoard(b)]));
+  const playerByGame = new Map((players ?? []).map((p) => [p.game_id, p]));
+
+  return games.flatMap((g) => {
+    const board = boardById.get(g.board_id);
+    if (!board) return [];
+    const player = playerByGame.get(g.id);
+    const me = player
+      ? {
+          count: countChecked(player.checked),
+          total: player.grid.length,
+          missing: cellsToBingo(player.checked, sizeFromLength(player.grid.length)),
+          hasBingo: player.has_bingo,
+        }
+      : null;
+    return [{ code: g.code, isHost: g.host_id === userId, title: board.title, theme: board.theme, createdAt: g.created_at, me }];
+  });
 }

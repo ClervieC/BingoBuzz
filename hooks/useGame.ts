@@ -4,15 +4,22 @@ import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useToast } from "@/components/Toast";
-import { ensureSession } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { fetchBoard } from "@/lib/db";
 import { errorKey } from "@/lib/errors";
 import { haptics } from "@/lib/haptics";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { BoardWithPhrases, Game, GameEvent, GamePlayer, PublicGame } from "@/types/bingo";
+import type { BoardWithPhrases, Game, GameClaim, GameEvent, GamePlayer, PublicGame } from "@/types/bingo";
 
 export type Phase = "loading" | "join" | "ready" | "error";
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "offline";
+
+/** Événement de proposition à signaler (mode « peer ») */
+export interface ClaimNotice {
+  seq: number;
+  kind: "new" | "confirmed" | "rejected";
+  claim: GameClaim;
+}
 
 export interface BingoNotice {
   seq: number;
@@ -46,10 +53,14 @@ export function useGame(publicGame: PublicGame) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<GamePlayer[]>([]);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  // propositions en attente + confirmées avec photo (mode « peer »)
+  const [claims, setClaims] = useState<GameClaim[]>([]);
   const [board, setBoard] = useState<BoardWithPhrases | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [online, setOnline] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState<BingoNotice | null>(null);
+  const [claimNotice, setClaimNotice] = useState<ClaimNotice | null>(null);
+  const claimSeq = useRef(0);
 
   const userIdRef = useRef<string | null>(null);
   const playersRef = useRef<GamePlayer[]>([]);
@@ -100,6 +111,29 @@ export function useGame(publicGame: PublicGame) {
     setPlayers(next);
   }, []);
 
+  /** Proposition reçue en direct : en attente → liste ; résolue → retirée (+ notification à l’auteur). */
+  const applyClaim = useCallback((claim: GameClaim, isNew: boolean) => {
+    const me = userIdRef.current;
+    if (claim.status === "pending") {
+      setClaims((list) => (list.some((c) => c.id === claim.id) ? list : [...list, claim]));
+      if (isNew && claim.claimed_by !== me) setClaimNotice({ seq: ++claimSeq.current, kind: "new", claim });
+      return;
+    }
+    // confirmée avec photo : reste dans la galerie ; sinon elle disparaît
+    setClaims((list) =>
+      claim.status === "confirmed" && claim.photo_path
+        ? list.map((c) => (c.id === claim.id ? claim : c))
+        : list.filter((c) => c.id !== claim.id),
+    );
+    // ma proposition contestée : sa photo n'a plus de raison d'être conservée
+    if (claim.claimed_by === me && claim.status === "rejected" && claim.photo_path) {
+      void supabase.storage.from("proofs").remove([claim.photo_path]);
+    }
+    if (claim.claimed_by === me && claim.resolved_by && claim.resolved_by !== me) {
+      setClaimNotice({ seq: ++claimSeq.current, kind: claim.status === "confirmed" ? "confirmed" : "rejected", claim });
+    }
+  }, [supabase]);
+
   const removePlayer = useCallback((id: string) => {
     const next = playersRef.current.filter((p) => p.id !== id);
     if (next.length === playersRef.current.length) return;
@@ -113,7 +147,9 @@ export function useGame(publicGame: PublicGame) {
 
   const load = useCallback(async () => {
     const { data: auth } = await supabase.auth.getSession();
-    const uid = auth.session?.user.id ?? null;
+    // connexion obligatoire : une ancienne session invité ne compte pas
+    const sessionUser = auth.session?.user;
+    const uid = sessionUser && !sessionUser.is_anonymous ? sessionUser.id : null;
     userIdRef.current = uid;
     setUserId(uid);
     if (!uid) {
@@ -121,10 +157,17 @@ export function useGame(publicGame: PublicGame) {
       return;
     }
 
-    const [gameRes, playersRes, eventsRes] = await Promise.all([
+    const [gameRes, playersRes, eventsRes, claimsRes] = await Promise.all([
       supabase.from("games").select("*").eq("id", gameId).maybeSingle(),
       supabase.from("game_players").select("*").eq("game_id", gameId),
       supabase.from("game_events").select("*").eq("game_id", gameId),
+      // en attente (à confirmer) + confirmées avec photo (galerie des preuves)
+      supabase
+        .from("game_claims")
+        .select("*")
+        .eq("game_id", gameId)
+        .or("status.eq.pending,and(status.eq.confirmed,photo_path.not.is.null)")
+        .order("created_at", { ascending: false }),
     ]);
     if (gameRes.error) throw gameRes.error;
     if (playersRes.error) throw playersRes.error;
@@ -139,6 +182,7 @@ export function useGame(publicGame: PublicGame) {
     setGame(gameRes.data);
     applyPlayers(playersRes.data ?? [], "replace");
     setEvents(eventsRes.data ?? []);
+    setClaims(claimsRes.data ?? []);
 
     if (!boardLoaded.current) {
       boardLoaded.current = true;
@@ -287,6 +331,20 @@ export function useGame(publicGame: PublicGame) {
       )
       .on(
         "postgres_changes",
+        { event: "INSERT", schema: "public", table: "game_claims", filter: `game_id=eq.${gameId}` },
+        (payload: RealtimePostgresChangesPayload<GameClaim>) => {
+          if (payload.eventType === "INSERT") applyClaim(payload.new, true);
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "game_claims", filter: `game_id=eq.${gameId}` },
+        (payload: RealtimePostgresChangesPayload<GameClaim>) => {
+          if (payload.eventType === "UPDATE") applyClaim(payload.new, false);
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
         (payload: RealtimePostgresChangesPayload<Game>) => {
           if (payload.eventType === "UPDATE") setGame(payload.new);
@@ -311,7 +369,7 @@ export function useGame(publicGame: PublicGame) {
       });
 
     channelRef.current = channel;
-  }, [supabase, gameId, applyPlayers, removePlayer, safeLoad, flushChecks]);
+  }, [supabase, gameId, applyPlayers, applyClaim, removePlayer, safeLoad, flushChecks]);
 
   // chargement initial
   useEffect(() => {
@@ -375,7 +433,7 @@ export function useGame(publicGame: PublicGame) {
 
   const join = useCallback(
     async (nickname: string) => {
-      await ensureSession();
+      await requireUser();
       const { error } = await supabase.rpc("join_game", { p_code: publicGame.code, p_nickname: nickname });
       if (error) throw error;
       await load();
@@ -383,8 +441,87 @@ export function useGame(publicGame: PublicGame) {
     [supabase, publicGame.code, load],
   );
 
+  /**
+   * Mode « peer » : proposer la phrase d'une case, avec une photo facultative
+   * (déjà compressée). La photo est déposée d'abord dans le dossier du joueur,
+   * puis supprimée si la proposition échoue. Renvoie true si c'est proposé.
+   */
+  const proposeClaim = useCallback(
+    async (index: number, photo?: Blob | null): Promise<boolean> => {
+      const uid = userIdRef.current;
+      const current = playersRef.current.find((p) => p.user_id === uid);
+      const cell = current?.grid[index];
+      if (!uid || !current || !cell?.id || current.checked[index]) return false;
+
+      let photoPath: string | null = null;
+      if (photo) {
+        photoPath = `${gameId}/${uid}/${crypto.randomUUID()}.jpg`;
+        const { error: uploadError } = await supabase.storage
+          .from("proofs")
+          .upload(photoPath, photo, { contentType: "image/jpeg", upsert: false });
+        if (uploadError) {
+          toast.show(t("errors.photo_upload"), { tone: "error" });
+          return false;
+        }
+      }
+
+      const { data, error } = await supabase.rpc("claim_phrase", {
+        p_game_id: gameId,
+        p_phrase_id: cell.id,
+        p_photo_path: photoPath,
+      });
+      if (error) {
+        if (photoPath) void supabase.storage.from("proofs").remove([photoPath]);
+        toast.show(t(errorKey(error)), { tone: "error" });
+        void safeLoad();
+        return false;
+      }
+      haptics.tap();
+      applyClaim(data, false);
+      toast.show(t("game.peer.sent"));
+      return true;
+    },
+    [supabase, gameId, applyClaim, safeLoad, toast, t],
+  );
+
+  /** Annuler sa propre proposition (la photo jointe est supprimée). */
+  const cancelClaim = useCallback(
+    async (claim: GameClaim) => {
+      setClaims((list) => list.filter((c) => c.id !== claim.id));
+      const { error } = await supabase.rpc("resolve_claim", { p_claim_id: claim.id, p_accept: false });
+      if (error) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        void safeLoad();
+        return;
+      }
+      if (claim.photo_path) void supabase.storage.from("proofs").remove([claim.photo_path]);
+    },
+    [supabase, safeLoad, toast, t],
+  );
+
+  /** Confirmer (ou contester) la proposition d’un autre joueur. */
+  const resolveClaim = useCallback(
+    async (claimId: string, accept: boolean) => {
+      if (accept) haptics.tap();
+      // sort tout de suite de « À confirmer » ; la galerie se met à jour via le temps réel
+      setClaims((list) =>
+        list.flatMap((c) =>
+          c.id !== claimId ? [c] : accept && c.photo_path ? [{ ...c, status: "confirmed" as const }] : [],
+        ),
+      );
+      const { error } = await supabase.rpc("resolve_claim", { p_claim_id: claimId, p_accept: accept });
+      if (error) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        void safeLoad();
+      }
+    },
+    [supabase, safeLoad, toast, t],
+  );
+
   const toggle = useCallback(
     (index: number) => {
+      // mode « peer » : l'écran ouvre la fenêtre de proposition (proposeClaim)
+      if (game?.mode === "peer") return;
       const current = playersRef.current.find((p) => p.user_id === userIdRef.current);
       if (!current || !game || game.mode !== "free" || game.status !== "playing") return;
       if (current.grid[index]?.free) return;
@@ -472,6 +609,11 @@ export function useGame(publicGame: PublicGame) {
     isHost,
     events,
     validatedIds,
+    claims,
+    claimNotice,
+    resolveClaim,
+    proposeClaim,
+    cancelClaim,
     connection,
     online,
     notice,

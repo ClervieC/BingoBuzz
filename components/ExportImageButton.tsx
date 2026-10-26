@@ -2,7 +2,7 @@
 
 import { useState, type RefObject } from "react";
 import { useT } from "./I18nProvider";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { useToast } from "./Toast";
 
 function slug(text: string): string {
@@ -26,11 +26,13 @@ export function ExportImageButton({
   title,
   className = "btn btn-ghost btn-sm",
   label,
+  icon = "image",
 }: {
   targetRef: RefObject<HTMLElement | null>;
   title: string;
   className?: string;
   label?: string;
+  icon?: IconName;
 }) {
   const t = useT();
   const toast = useToast();
@@ -79,7 +81,7 @@ export function ExportImageButton({
 
   return (
     <button type="button" className={className} onClick={exportImage} disabled={busy} aria-busy={busy}>
-      <Icon name="image" size={20} />
+      <Icon name={icon} size={20} />
       {label ?? t("export.image")}
     </button>
   );

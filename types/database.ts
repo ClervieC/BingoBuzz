@@ -5,7 +5,7 @@
  * (les colonnes jsonb redeviennent alors `Json` : garder les casts dans lib/db.ts).
  */
 
-import type { BoardTheme, Cell, GameMode, GameStatus, GridSize } from "./bingo";
+import type { BoardTheme, Cell, ClaimStatus, GameClaim, GameMode, GameStatus, GridSize } from "./bingo";
 
 type BoardRow = {
   id: string;
@@ -113,6 +113,21 @@ export type Database = {
           },
         ];
       };
+      game_claims: {
+        // type littéral (et non interface) : exigé par les types génériques de supabase-js
+        Row: { [K in keyof GameClaim]: GameClaim[K] };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "game_claims_game_id_fkey";
+            columns: ["game_id"];
+            isOneToOne: false;
+            referencedRelation: "games";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       game_events: {
         Row: GameEventRow;
         Insert: Partial<GameEventRow> & Pick<GameEventRow, "game_id" | "phrase_id">;
@@ -160,6 +175,26 @@ export type Database = {
         Args: { p_code: string; p_nickname: string };
         Returns: GamePlayerRow;
       };
+      claim_phrase: {
+        Args: { p_game_id: string; p_phrase_id: string; p_photo_path?: string | null };
+        Returns: { [K in keyof GameClaim]: GameClaim[K] };
+      };
+      resolve_claim: {
+        Args: { p_claim_id: string; p_accept: boolean };
+        Returns: { [K in keyof GameClaim]: GameClaim[K] };
+      };
+      board_locked: {
+        Args: { p_board_id: string };
+        Returns: boolean;
+      };
+      export_my_data: {
+        Args: Record<string, never>;
+        Returns: Record<string, unknown>;
+      };
+      delete_my_account: {
+        Args: Record<string, never>;
+        Returns: undefined;
+      };
       get_game_public: {
         Args: { p_code: string };
         Returns: {
@@ -179,6 +214,7 @@ export type Database = {
     Enums: {
       game_mode: GameMode;
       game_status: GameStatus;
+      claim_status: ClaimStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };

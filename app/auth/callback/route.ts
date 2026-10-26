@@ -3,15 +3,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
- * Retour des liens magiques, de la confirmation d'e-mail (conversion d'un
- * compte invité) et d'OAuth Google. Gère le flux PKCE (`code`) et les liens
- * `token_hash` des modèles d'e-mail personnalisés.
+ * Retour de Google (OAuth) et des liens magiques. Gère le flux PKCE (`code`)
+ * et les liens `token_hash` des modèles d'e-mail personnalisés, puis renvoie
+ * vers la page demandée avant la connexion (`next`).
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;
-  const rawNext = searchParams.get("next") ?? "/library";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/library";
-  const upgraded = searchParams.get("upgraded") === "1";
+  const rawNext = searchParams.get("next") ?? "/";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
 
   const supabase = await getSupabaseServerClient();
   const code = searchParams.get("code");
@@ -28,9 +27,11 @@ export async function GET(request: NextRequest) {
   }
 
   if (!ok) {
-    return NextResponse.redirect(new URL("/login?error=1", origin));
+    const failure = new URL("/", origin);
+    failure.searchParams.set("error", "1");
+    if (next !== "/") failure.searchParams.set("next", next);
+    return NextResponse.redirect(failure);
   }
 
-  const destination = new URL(upgraded ? "/login?upgraded=1" : next, origin);
-  return NextResponse.redirect(destination);
+  return NextResponse.redirect(new URL(next, origin));
 }

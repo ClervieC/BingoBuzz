@@ -62,7 +62,7 @@ export function Leaderboard({
   }
 
   return (
-    <ol className="space-y-2" aria-live="polite">
+    <ol className="stagger space-y-2" aria-live="polite">
       {ranked.map(({ player, count, total, missing, bingo }, i) => {
         const isMe = player.user_id === userId;
         const isOnline = online.has(player.user_id);
@@ -80,7 +80,13 @@ export function Leaderboard({
                   bingo ? "bg-gold text-black" : "bg-surface-2"
                 }`}
               >
-                {bingo ? <Icon name="trophy" size={18} /> : i + 1}
+                {bingo ? (
+                  <Icon name="trophy" size={18} />
+                ) : count > 0 && i < 3 ? (
+                  <span className="text-2xl leading-none">{["🥇", "🥈", "🥉"][i]}</span>
+                ) : (
+                  i + 1
+                )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">

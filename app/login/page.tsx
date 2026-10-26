@@ -1,27 +1,19 @@
-import type { Metadata } from "next";
-import { AppHeader } from "@/components/AppHeader";
-import { getT } from "@/lib/i18n/server";
-import { LoginClient } from "./LoginClient";
+import { redirect } from "next/navigation";
+import { getServerUser } from "@/lib/supabase/user";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getT();
-  return { title: t("login.title"), robots: { index: false } };
-}
+type Props = { searchParams: Promise<{ error?: string; next?: string }> };
 
-type Props = { searchParams: Promise<{ error?: string; upgraded?: string; next?: string }> };
-
+/**
+ * Ancienne adresse : sans compte, la connexion se fait sur l'accueil (/) ;
+ * connecté, la gestion du compte est dans /settings.
+ */
 export default async function LoginPage({ searchParams }: Props) {
-  const [{ t }, params] = await Promise.all([getT(), searchParams]);
-  return (
-    <>
-      <AppHeader back="/" backLabel={t("common.back")} title={t("nav.account")} />
-      <main className="page pb-safe pt-6">
-        <LoginClient
-          callbackError={params.error === "1"}
-          upgraded={params.upgraded === "1"}
-          next={params.next?.startsWith("/") && !params.next.startsWith("//") ? params.next : "/library"}
-        />
-      </main>
-    </>
-  );
+  const [params, user] = await Promise.all([searchParams, getServerUser()]);
+  if (user && !user.isAnonymous) redirect("/settings");
+
+  const query = new URLSearchParams();
+  if (params.next) query.set("next", params.next);
+  if (params.error) query.set("error", params.error);
+  const qs = query.toString();
+  redirect(qs ? `/?${qs}` : "/");
 }

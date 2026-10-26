@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanPhrase, isDuplicate, MAX_PHRASE_LENGTH, parsePhrases } from "./phrases";
+import { cleanPhrase, frenchSpacing, isDuplicate, MAX_PHRASE_LENGTH, parsePhrases } from "./phrases";
 
 describe("cleanPhrase", () => {
   it.each([
@@ -38,5 +38,16 @@ describe("isDuplicate", () => {
   it("compare sans casse ni espaces", () => {
     expect(isDuplicate("  On en reparle ", ["on en reparle"])).toBe(true);
     expect(isDuplicate("Autre", ["on en reparle"])).toBe(false);
+  });
+});
+
+describe("frenchSpacing", () => {
+  it("rend insécables les espaces de la ponctuation double", () => {
+    expect(frenchSpacing("« Vive les mariés ! »")).toBe("«\u00a0Vive les mariés\u00a0!\u00a0»");
+    expect(frenchSpacing("Tu m'entends ?")).toBe("Tu m'entends\u00a0?");
+  });
+
+  it("ne touche pas au reste", () => {
+    expect(frenchSpacing("Il pleut")).toBe("Il pleut");
   });
 });

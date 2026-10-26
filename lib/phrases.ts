@@ -30,3 +30,11 @@ export function isDuplicate(phrase: string, list: readonly string[]): boolean {
   const key = phrase.trim().toLocaleLowerCase("fr");
   return list.some((p) => p.toLocaleLowerCase("fr") === key);
 }
+
+/**
+ * Typographie française à l'affichage : espace insécable après « et avant
+ * » ! ? : ; pour qu'un signe ne se retrouve jamais seul en début de ligne.
+ */
+export function frenchSpacing(text: string): string {
+  return text.replace(/«\s+/g, "«\u00a0").replace(/\s+([»!?:;])/g, "\u00a0$1");
+}

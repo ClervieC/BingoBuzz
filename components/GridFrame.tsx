@@ -1,6 +1,7 @@
 import { forwardRef, type ReactNode } from "react";
 import { themeStyle } from "@/lib/themes";
 import type { BoardTheme } from "@/types/bingo";
+import { Logo } from "./Logo";
 
 /**
  * Cadre autour d'une grille : titre + emoji en haut, marque en bas.
@@ -25,7 +26,9 @@ export const GridFrame = forwardRef<
         </div>
       </div>
       {children}
-      <p className="mt-3 text-center text-xs font-bold tracking-wide text-muted">BingoBuzz</p>
+      <div className="mt-3 flex justify-center opacity-80">
+        <Logo size={22} />
+      </div>
     </div>
   );
 });

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useId, useMemo, useState } from "react";
 import type { BoardWithPhrases, Game } from "@/types/bingo";
 import { useT } from "./I18nProvider";
@@ -12,12 +13,15 @@ export function HostPanel({
   validatedIds,
   onTogglePhrase,
   onEnd,
+  edit,
 }: {
   game: Game;
   board: BoardWithPhrases | null;
   validatedIds: ReadonlySet<string>;
   onTogglePhrase: (phraseId: string) => void;
   onEnd: () => void;
+  /** l’hôte possède le bingo : lien d’édition, verrouillé dès qu’un joueur a rejoint */
+  edit?: { href: string; locked: boolean };
 }) {
   const t = useT();
   const searchId = useId();
@@ -40,6 +44,19 @@ export function HostPanel({
         <Icon name="megaphone" size={16} />
         {t("game.host.youAreHost")}
       </p>
+
+      {edit && !finished &&
+        (edit.locked ? (
+          <p className="rounded-2xl bg-surface-2 p-3 text-sm text-muted">{t("game.host.locked")}</p>
+        ) : (
+          <div className="card flex items-center gap-3 p-4">
+            <p className="min-w-0 flex-1 text-sm text-muted">{t("game.host.edit.hint")}</p>
+            <Link href={edit.href} className="btn btn-secondary btn-sm shrink-0">
+              <Icon name="edit" size={18} />
+              {t("game.host.edit")}
+            </Link>
+          </div>
+        ))}
 
       {game.mode === "validated" ? (
         <section>
@@ -104,7 +121,9 @@ export function HostPanel({
           )}
         </section>
       ) : (
-        <p className="card p-4 text-muted">{t("game.host.freeMode")}</p>
+        <p className="card p-4 text-muted">
+          {t(game.mode === "peer" ? "game.host.peerMode" : "game.host.freeMode")}
+        </p>
       )}
 
       {!finished && (

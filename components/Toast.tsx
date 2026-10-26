@@ -19,8 +19,8 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 const TONE_CLASS: Record<Tone, string> = {
   info: "bg-fg text-bg",
-  success: "bg-success text-white dark:text-black",
-  error: "bg-danger text-white dark:text-black",
+  success: "bg-success text-on-status",
+  error: "bg-danger text-on-status",
   bingo: "bg-gold text-black",
 };
 

@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { I18nProvider } from "@/components/I18nProvider";
+import { PreferencesProvider } from "@/components/PreferencesProvider";
 import { ToastProvider } from "@/components/Toast";
 import { getT } from "@/lib/i18n/server";
+import { THEME_COLOR } from "@/lib/preferences";
+import { getThemePreference } from "@/lib/preferences.server";
 import { getSiteUrl } from "@/lib/site";
 import "./globals.css";
 
@@ -23,23 +26,32 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f6f4fb" },
-    { media: "(prefers-color-scheme: dark)", color: "#110f1c" },
-  ],
-};
+export async function generateViewport(): Promise<Viewport> {
+  const theme = await getThemePreference();
+  return {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+    themeColor:
+      theme === "system"
+        ? [
+            { media: "(prefers-color-scheme: light)", color: THEME_COLOR.light },
+            { media: "(prefers-color-scheme: dark)", color: THEME_COLOR.dark },
+          ]
+        : THEME_COLOR[theme],
+  };
+}
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const { locale } = await getT();
+  const [{ locale }, theme] = await Promise.all([getT(), getThemePreference()]);
   return (
-    <html lang={locale}>
+    // data-theme absent = suit le système (voir globals.css)
+    <html lang={locale} data-theme={theme === "system" ? undefined : theme} suppressHydrationWarning>
       <body className="antialiased">
         <I18nProvider locale={locale}>
-          <ToastProvider>{children}</ToastProvider>
+          <PreferencesProvider initialTheme={theme}>
+            <ToastProvider>{children}</ToastProvider>
+          </PreferencesProvider>
         </I18nProvider>
       </body>
     </html>
