@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { HeaderNav } from "@/components/HeaderNav";
 import { fetchBoard } from "@/lib/db";
+import { requiredPhraseCount } from "@/lib/random";
 import { getT } from "@/lib/i18n/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getServerUser } from "@/lib/supabase/user";
@@ -25,13 +26,13 @@ export default async function BoardPage({ params }: Props) {
   const [{ t }, user, board] = await Promise.all([getT(), getServerUser(), fetchBoard(supabase, id)]);
   if (!board) notFound();
 
-  // Un bingo ne se joue qu'une fois à la fois : s'il a une partie en cours dont
-  // je fais partie (RLS), ouvrir le bingo me ramène directement sur la grille.
+  // Un bingo ne se joue qu'une fois à la fois : s'il a une partie en cours ou en
+  // préparation dont je fais partie (RLS), ouvrir le bingo m'y ramène directement.
   const { data: ongoing } = await supabase
     .from("games")
     .select("code")
     .eq("board_id", board.id)
-    .eq("status", "playing")
+    .in("status", ["lobby", "playing"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -63,6 +64,7 @@ export default async function BoardPage({ params }: Props) {
           isOwner={isOwner}
           locked={locked}
           isTemplate={board.is_template}
+          missing={Math.max(0, requiredPhraseCount(board.grid_size, board.free_center) - board.phrases.length)}
         />
 
         <PhraseCloud phrases={board.phrases} />

@@ -18,6 +18,15 @@ const KNOWN = [
   "not_member",
   "invalid_photo",
   "invalid_duration",
+  "lobby_template",
+  "not_lobby",
+  "phrase_exists",
+  "phrase_not_found",
+  "invalid_phrase",
+  "too_many_phrases",
+  "mode_locked",
+  "not_started",
+  "game_already_open",
 ] as const;
 
 /**

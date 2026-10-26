@@ -20,6 +20,8 @@ export interface RankedPlayer {
  */
 export function rankPlayers(players: GamePlayer[]): RankedPlayer[] {
   return players
+    // pas encore de grille (partie en préparation, ou distribution en cours)
+    .filter((player) => player.grid.length > 0)
     .map((player) => {
       const size = sizeFromLength(player.grid.length);
       return {

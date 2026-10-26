@@ -15,6 +15,8 @@ Le bingo des phrases qu'on entend partout. Les cases contiennent des phrases ou 
   - **par le groupe** : un joueur propose une case (photo de preuve facultative), un autre la confirme ; elle se coche alors chez tous ceux qui l’ont.
 
   Classement en direct, « Plus qu'une case ! », alerte BINGO avec la grille du gagnant à vérifier, et resynchronisation au retour sur l'onglet.
+- **Brouillon et préparation à plusieurs** : un bingo peut être enregistré incomplet. L’hôte ouvre une partie « en préparation » (même code et même lien) : les invités la rejoignent et ajoutent des phrases (chacun retire les siennes, l’hôte toutes), puis l’hôte lance la partie et chacun reçoit sa grille.
+- **Paramètres de la partie** (hôte) : mode (avant le lancement), règle de fin et durée modifiables, remise à zéro (option : nouvelles grilles), retour en préparation.
 - **Fin de partie** : à la main, automatiquement au 1er bingo ou au carton plein, ou après 1, 3 ou 7 jours (choisi au lancement).
 - **Réactions** 😂🔥👏😮❤️ sur les bingos (classement) et les propositions / photos, en temps réel.
 - **Notifications push** (facultatives, voir Déploiement § 5) : bingo d'un joueur, proposition à confirmer, sa proposition confirmée ou contestée, fin de partie.
@@ -103,7 +105,7 @@ Sans la CLI, on peut aussi exécuter les fichiers de `supabase/migrations/` un p
 
 Les migrations créent les tables, les fonctions, les policies RLS et la publication Realtime, puis insèrent les modèles (5 en français, 5 en anglais, affichés selon la langue de l'interface).
 
-**Projet déjà en production ?** `npx supabase db push` n'applique que les migrations manquantes. Dans SQL Editor, exécuter dans l'ordre celles qui n'ont pas encore été passées (de `…0007_account.sql` à `…0013_engagement.sql` si vous étiez resté à la v1).
+**Projet déjà en production ?** `npx supabase db push` n'applique que les migrations manquantes. Dans SQL Editor, exécuter dans l'ordre celles qui n'ont pas encore été passées (de `…0007_account.sql` à `…0015_lobby.sql` si vous étiez resté à la v1). La `…0014_lobby_enum.sql` doit être exécutée **seule, avant** la `…0015`. La `…0015` peut être relancée sans risque.
 
 ### 3. Configurer l'authentification
 

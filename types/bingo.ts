@@ -2,7 +2,8 @@ export type GridSize = 3 | 4 | 5;
 /** free : chacun coche ; validated : l’hôte valide ; peer : un autre joueur confirme */
 export type GameMode = "free" | "validated" | "peer";
 export type ClaimStatus = "pending" | "confirmed" | "rejected";
-export type GameStatus = "playing" | "finished";
+/** lobby : en préparation (les invités ajoutent des phrases, pas encore de grille) */
+export type GameStatus = "lobby" | "playing" | "finished";
 /** fin automatique choisie par l'hôte */
 export type GameAutoEnd = "manual" | "first_bingo" | "full_card";
 export const REACTION_EMOJIS = ["😂", "🔥", "👏", "😮", "❤️"] as const;
@@ -34,6 +35,8 @@ export interface Phrase {
   id: string;
   text: string;
   position: number;
+  /** auteur d'une phrase proposée pendant la préparation */
+  added_by?: string | null;
 }
 
 export interface Board {
@@ -63,6 +66,8 @@ export interface Game {
   ended_at: string | null;
   auto_end: GameAutoEnd;
   ends_at: string | null;
+  /** durée choisie, appliquée au lancement d'une partie préparée */
+  duration_days: number | null;
 }
 
 export interface GamePlayer {

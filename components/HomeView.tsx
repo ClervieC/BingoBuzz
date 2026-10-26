@@ -149,7 +149,9 @@ function ActiveGameCard({ game, t }: { game: ActiveGame; t: Translator }) {
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-bold">
           <span className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono tracking-widest">{game.code}</span>
           {game.isHost && <span className="text-accent">{t("home.active.host")}</span>}
-          {game.me?.hasBingo ? (
+          {game.lobby ? (
+            <span className="text-accent">✍️ {t("home.active.lobby")}</span>
+          ) : game.me?.hasBingo ? (
             <span className="text-gold">BINGO 🎉</span>
           ) : game.me?.missing === 1 ? (
             <span className="animate-pulse text-accent">{t("game.ranking.oneLeft")}</span>

@@ -65,6 +65,8 @@ for (const file of readdirSync(dir).sort()) {
   await db.exec(readFileSync(join(dir, file), "utf8"));
   console.log("migration OK :", file);
 }
+await db.exec(readFileSync(join(dir, "20261027000015_lobby.sql"), "utf8"));
+console.log("migration ré-exécutée sans erreur : 20261027000015_lobby.sql");
 
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
@@ -120,11 +122,11 @@ const [{ id: boardId }] = await q(
 ok(Boolean(boardId), "save_board crée un bingo");
 const savedPhrases = await q("select text from public.board_phrases where board_id = $1 order by position", [boardId]);
 ok(savedPhrases.length === 10, `doublons et vides retirés (${savedPhrases.length} phrases)`);
-await expectError(
-  q("select public.save_board(null, 'Court', '{}', 5, false, array['a','b'])"),
-  /not_enough_phrases/,
-  "save_board refuse trop peu de phrases",
-);
+// brouillon : moins de phrases que de cases (vérifié au lancement d'une partie)
+const [{ id: shortId }] = await q("select public.save_board(null, 'Court', '{}', 5, false, array['a','b']) as id");
+ok(Boolean(shortId), "save_board accepte un brouillon incomplet");
+await expectError(q("select * from public.create_game($1)", [shortId]), /not_enough_phrases/, "pas de partie sur un brouillon incomplet");
+await q("delete from public.boards where id = $1", [shortId]);
 // édition : les ids des phrases conservées ne changent pas
 const before = await q("select id, text from public.board_phrases where board_id = $1 and text = 'Trois'", [boardId]);
 await q("select public.save_board($1, 'Test 2', '{\"emoji\":\"🎉\",\"color\":\"blue\"}', 3, true, $2)", [
@@ -467,6 +469,115 @@ ok(
 ok(!JSON.stringify(exportedD.push_devices).includes('"auth"'), "export sans les clés de chiffrement push");
 await expectError(q("select public.bb_export_my_data_v12()"), /permission denied/, "ancienne version de l'export non appelable");
 void autoD;
+
+// --- Préparation collaborative ---------------------------------------------------
+console.log("\nPréparation collaborative");
+await as(B);
+const [{ id: draftId }] = await q(
+  "select public.save_board(null, 'Brouillon', '{\"emoji\":\"📝\",\"color\":\"teal\"}', 3, true, array['Un', 'Deux', 'Trois']) as id",
+);
+ok(Boolean(draftId), "un bingo incomplet s'enregistre en brouillon");
+await expectError(q("select * from public.create_game($1)", [draftId]), /not_enough_phrases/, "pas de partie immédiate sur un brouillon");
+await expectError(
+  q("select * from public.create_game($1, 'free', 'manual', null, true)", [NOEL]),
+  /lobby_template/,
+  "pas de préparation sur un modèle partagé",
+);
+const [lobby] = await q("select * from public.create_game($1, 'free', 'manual', 2, true)", [draftId]);
+ok(lobby.status === "lobby" && lobby.ends_at === null && lobby.duration_days === 2, "partie en préparation, durée gardée pour le lancement");
+const [lobbyAgain] = await q("select * from public.create_game($1, 'free', 'manual', null, true)", [draftId]);
+ok(lobbyAgain.id === lobby.id, "une seule préparation à la fois par bingo");
+await expectError(
+  q("update public.games set status = 'playing' where id = $1", [lobby.id]),
+  /use_start_game/,
+  "on ne lance pas sans distribuer les grilles",
+);
+
+await as(D);
+const [lobbyD] = await q("select * from public.join_game($1, 'Dan')", [lobby.code]);
+ok(lobbyD.grid.length === 0, "on rejoint la préparation sans grille");
+for (const text of ["Quatre", "Cinq", "Six", "Sept"]) {
+  await q("select * from public.add_lobby_phrase($1, $2)", [lobby.id, text]);
+}
+ok((await q("select * from public.board_phrases where board_id = $1", [draftId])).length === 7, "un invité ajoute des phrases et les voit toutes");
+await expectError(q("select * from public.add_lobby_phrase($1, '  cinq ')", [lobby.id]), /phrase_exists/, "pas de doublon (casse et espaces ignorés)");
+const [hostPhrase] = await q("select id from public.board_phrases where board_id = $1 and text = 'Un'", [draftId]);
+await expectError(q("select public.remove_lobby_phrase($1, $2)", [lobby.id, hostPhrase.id]), /phrase_not_found/, "un invité ne retire pas les phrases des autres");
+const [own] = await q("select id from public.board_phrases where board_id = $1 and text = 'Sept'", [draftId]);
+await q("select public.remove_lobby_phrase($1, $2)", [lobby.id, own.id]);
+ok((await q("select * from public.board_phrases where board_id = $1", [draftId])).length === 6, "un invité retire sa phrase");
+await expectError(q("select * from public.start_game($1)", [lobby.id]), /game_not_found/, "seul l'hôte lance la partie");
+await as(A);
+await expectError(q("select * from public.add_lobby_phrase($1, 'Intrus')", [lobby.id]), /not_member/, "un non-membre n'ajoute rien");
+
+await as(B);
+await expectError(q("select * from public.start_game($1)", [lobby.id]), /not_enough_phrases/, "lancement impossible sans assez de phrases");
+ok((await q("select status from public.games where id = $1", [lobby.id]))[0].status === "lobby", "la préparation continue après un lancement refusé");
+await q("select * from public.add_lobby_phrase($1, 'Huit')", [lobby.id]);
+await q("select * from public.add_lobby_phrase($1, 'Neuf')", [lobby.id]);
+const [started] = await q("select * from public.start_game($1)", [lobby.id]);
+ok(started.status === "playing" && started.ends_at !== null, "l'hôte lance : partie en jeu, échéance calculée");
+await as(D);
+const [dealt] = await q("select * from public.game_players where id = $1", [lobbyD.id]);
+ok(dealt.grid.length === 9 && dealt.checked[4] === true, "chaque membre reçoit sa grille au lancement");
+await expectError(q("select * from public.add_lobby_phrase($1, 'Trop tard')", [lobby.id]), /not_lobby/, "plus d'ajout une fois la partie lancée");
+await as(B);
+ok((await q("select public.board_locked($1) as l", [draftId]))[0].l === true, "le bingo est verrouillé une fois lancé");
+const [{ data: exportedLobbyD }] = await (async () => { await as(D); return q("select public.export_my_data() as data"); })();
+ok(exportedLobbyD.contributed_phrases.length === 3, "export : phrases proposées dans le bingo d'un autre");
+
+await as(B);
+const [{ id: draftSettingsId }] = await q("select public.save_board(null, 'Réglages', '{}', 3, false, array['a','b','c','d','e','f','g','h','i']) as id");
+// réglages modifiés par l'hôte
+await as(B);
+const [lobby2] = await q("select * from public.create_game($1, 'free', 'manual', null, true)", [draftSettingsId]);
+const [set1] = await q("select * from public.update_game_settings($1, 'peer', 'full_card', 7)", [lobby2.id]);
+ok(set1.mode === "peer" && set1.auto_end === "full_card" && set1.duration_days === 7 && set1.ends_at === null, "en préparation : mode, fin et durée modifiables");
+await as(D);
+await expectError(q("select * from public.update_game_settings($1, 'free', 'manual')", [lobby2.id]), /game_not_found/, "seul l'hôte change les réglages");
+await as(B);
+await q("delete from public.games where id = $1", [lobby2.id]);
+const [running] = await q("select * from public.create_game($1, 'free', 'manual', 1)", [draftSettingsId]);
+await expectError(q("select * from public.update_game_settings($1, 'validated', 'manual')", [running.id]), /mode_locked/, "en jeu, le mode ne change plus");
+const [kept] = await q("select * from public.update_game_settings($1, 'free', 'manual', null, true)", [running.id]);
+ok(kept.ends_at === running.ends_at || String(kept.ends_at) === String(running.ends_at), "en jeu : on peut garder l'échéance");
+const [extended] = await q("select * from public.update_game_settings($1, 'free', 'manual', 7)", [running.id]);
+ok(new Date(extended.ends_at) > new Date(running.ends_at), "en jeu : on prolonge la partie");
+const [noLimit] = await q("select * from public.update_game_settings($1, 'free', 'manual', null)", [running.id]);
+ok(noLimit.ends_at === null, "en jeu : on retire la limite de temps");
+const [runningB] = await q("select * from public.join_game($1, 'Bob')", [running.code]);
+await q("update public.game_players set checked = $1 where id = $2", [JSON.stringify(runningB.checked.map((v, i) => v || i < 3)), runningB.id]);
+const [endedBySettings] = await q("select * from public.update_game_settings($1, 'free', 'first_bingo')", [running.id]);
+ok(endedBySettings.status === "finished", "passer à « fin au 1er bingo » termine si un bingo existe déjà");
+
+// remise à zéro par l'hôte (la partie « running » vient d'être terminée par un bingo)
+await as(D);
+await expectError(q("select * from public.reset_game($1)", [running.id]), /game_not_found/, "seul l'hôte remet à zéro");
+await as(B);
+const [reset] = await q("select * from public.reset_game($1)", [running.id]);
+const [afterReset] = await q("select * from public.game_players where id = $1", [runningB.id]);
+ok(
+  reset.status === "playing" && !afterReset.has_bingo && afterReset.checked.every((v) => v === false)
+    && JSON.stringify(afterReset.grid) === JSON.stringify(runningB.grid),
+  "remise à zéro : partie relancée, coches effacées, même grille",
+);
+const [resetNew] = await q("select * from public.reset_game($1, true)", [running.id]);
+const [afterNew] = await q("select * from public.game_players where id = $1", [runningB.id]);
+ok(resetNew.status === "playing" && afterNew.grid.length === 9 && afterNew.seed !== undefined, "remise à zéro avec nouvelles grilles");
+
+// retour en préparation
+await as(D);
+await expectError(q("select * from public.reopen_lobby($1)", [running.id]), /game_not_found/, "seul l'hôte remet en préparation");
+await as(B);
+const [reopened] = await q("select * from public.reopen_lobby($1)", [running.id]);
+const [afterReopen] = await q("select * from public.game_players where id = $1", [runningB.id]);
+ok(reopened.status === "lobby" && reopened.ends_at === null && afterReopen.grid.length === 0, "retour en préparation : grilles retirées, membres gardés");
+ok((await q("select public.board_locked($1) as l", [draftSettingsId]))[0].l === false, "le bingo redevient modifiable");
+await q("select * from public.add_lobby_phrase($1, 'Nouvelle idée')", [running.id]);
+const [relaunched] = await q("select * from public.start_game($1)", [running.id]);
+const [afterRelaunch] = await q("select * from public.game_players where id = $1", [runningB.id]);
+ok(relaunched.status === "playing" && afterRelaunch.grid.length === 9, "relancée avec de nouvelles grilles");
+await expectError(q("select * from public.reopen_lobby($1)", [auto.id]), /lobby_template/, "pas de préparation sur un modèle partagé");
 
 // --- RGPD : export et suppression du compte ----------------------------------------
 console.log("\nRGPD");

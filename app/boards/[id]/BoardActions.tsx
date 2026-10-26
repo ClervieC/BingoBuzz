@@ -10,11 +10,8 @@ import { useToast } from "@/components/Toast";
 import { requireUser } from "@/lib/auth";
 import { errorKey } from "@/lib/errors";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { GameAutoEnd, GameMode } from "@/types/bingo";
-
-/** Règles de fin proposées à l'hôte : automatique (bingo, carton plein) ou durée. */
-type EndRule = GameAutoEnd | "1d" | "3d" | "7d";
-const END_RULES: EndRule[] = ["manual", "first_bingo", "full_card", "1d", "3d", "7d"];
+import { EndRulePicker, ModePicker, endRuleParams, type EndRule } from "@/components/GameOptions";
+import type { GameMode } from "@/types/bingo";
 
 export function BoardActions({
   boardId,
@@ -22,6 +19,7 @@ export function BoardActions({
   isOwner,
   locked = false,
   isTemplate,
+  missing = 0,
 }: {
   boardId: string;
   title: string;
@@ -29,6 +27,8 @@ export function BoardActions({
   /** une partie en cours a des joueurs : édition impossible */
   locked?: boolean;
   isTemplate: boolean;
+  /** phrases manquantes pour une grille (brouillon) */
+  missing?: number;
 }) {
   const t = useT();
   const toast = useToast();
@@ -36,6 +36,11 @@ export function BoardActions({
   const [sheet, setSheet] = useState(false);
   const [mode, setMode] = useState<GameMode>("free");
   const [endRule, setEndRule] = useState<EndRule>("manual");
+  // préparer avec le groupe : seul le propriétaire (les invités écrivent dans le bingo)
+  const canPrepare = isOwner && !isTemplate;
+  const draft = missing > 0;
+  const [prepare, setPrepare] = useState(draft);
+  const lobby = canPrepare && (prepare || draft);
   const [busy, setBusy] = useState<null | "game" | "duplicate" | "delete">(null);
 
   async function createGame() {
@@ -45,8 +50,8 @@ export function BoardActions({
       const { data, error } = await getSupabaseBrowserClient().rpc("create_game", {
         p_board_id: boardId,
         p_mode: mode,
-        p_auto_end: endRule.endsWith("d") ? "manual" : (endRule as GameAutoEnd),
-        p_duration_days: endRule.endsWith("d") ? Number.parseInt(endRule, 10) : null,
+        ...endRuleParams(endRule),
+        p_lobby: lobby,
       });
       if (error || !data) throw error ?? new Error("create_game");
       router.push(`/play/${data.code}`);
@@ -94,14 +99,17 @@ export function BoardActions({
         <button
           type="button"
           onClick={() => setSheet(true)}
-          className="wiggle-parent lift flex items-center gap-4 rounded-3xl bg-accent p-5 text-left text-accent-fg shadow-lg shadow-violet-900/20 transition active:scale-[0.98]"
+          disabled={draft && !canPrepare}
+          className="wiggle-parent lift flex items-center gap-4 rounded-3xl bg-accent p-5 text-left text-accent-fg shadow-lg shadow-violet-900/20 transition active:scale-[0.98] disabled:opacity-60"
         >
           <span className="wiggle grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/20 text-3xl">
-            🎉
+            {draft ? "✍️" : "🎉"}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-lg font-black">{t("board.createGame")}</span>
-            <span className="block text-sm opacity-85">{t("board.createGame.hint")}</span>
+            <span className="block text-lg font-black">{draft ? t("board.prepare") : t("board.createGame")}</span>
+            <span className="block text-sm opacity-85">
+              {draft ? t("board.draft.hint", { count: missing }) : t("board.createGame.hint")}
+            </span>
           </span>
           <Icon name="back" className="shrink-0 rotate-180" />
         </button>
@@ -109,7 +117,11 @@ export function BoardActions({
         <div className="grid grid-cols-2 gap-3">
           <Link
             href={`/solo/${boardId}`}
-            className="card wiggle-parent lift flex flex-col gap-2 p-4 transition active:scale-[0.97]"
+            aria-disabled={draft}
+            onClick={(e) => {
+              if (draft) e.preventDefault();
+            }}
+            className={`card wiggle-parent lift flex flex-col gap-2 p-4 transition active:scale-[0.97] ${draft ? "pointer-events-none opacity-50" : ""}`}
           >
             <span className="wiggle grid h-11 w-11 place-items-center rounded-2xl bg-accent-soft text-accent">
               <Icon name="play" />
@@ -165,52 +177,41 @@ export function BoardActions({
       </div>
 
       <BottomSheet open={sheet} onClose={() => setSheet(false)} title={t("board.mode")}>
-        <div className="space-y-3" role="radiogroup" aria-label={t("board.mode")}>
-          {(["free", "peer", "validated"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="radio"
-              aria-checked={mode === m}
-              onClick={() => setMode(m)}
-              className={`flex w-full items-start gap-3 rounded-2xl border-2 p-4 text-left transition ${
-                mode === m ? "border-accent bg-accent-soft" : "border-border"
-              }`}
-            >
-              <span
-                aria-hidden
-                className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 ${
-                  mode === m ? "border-accent bg-accent text-accent-fg" : "border-border"
-                }`}
-              >
-                {mode === m && <Icon name="check" size={14} strokeWidth={3} />}
-              </span>
-              <span>
-                <span className="block font-bold">{t(`board.mode.${m}`)}</span>
-                <span className="block text-sm text-muted">{t(`board.mode.${m}.hint`)}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-        <h3 className="mt-6 mb-2 font-bold">{t("board.end")}</h3>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("board.end")}>
-          {END_RULES.map((rule) => (
-            <button
-              key={rule}
-              type="button"
-              role="radio"
-              aria-checked={endRule === rule}
-              onClick={() => setEndRule(rule)}
-              className={`min-h-[40px] rounded-full border-2 px-3 text-sm font-bold transition active:scale-95 ${
-                endRule === rule ? "border-accent bg-accent-soft" : "border-border"
-              }`}
-            >
-              {rule.endsWith("d")
-                ? `⏱ ${t("board.end.days", { count: Number.parseInt(rule, 10) })}`
-                : t(`board.end.${rule as GameAutoEnd}`)}
-            </button>
-          ))}
-        </div>
+        {canPrepare && (
+            <div className="mb-5 grid grid-cols-2 gap-2" role="radiogroup" aria-label={t("board.start")}>
+              {([false, true] as const).map((value) => {
+                const selected = lobby === value;
+                const disabled = !value && draft;
+                return (
+                  <button
+                    key={String(value)}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={disabled}
+                    onClick={() => setPrepare(value)}
+                    className={`rounded-2xl border-2 p-3 text-left transition active:scale-[0.98] disabled:opacity-50 ${
+                      selected ? "border-accent bg-accent-soft" : "border-border"
+                    }`}
+                  >
+                    <span className="block text-xl" aria-hidden>
+                      {value ? "✍️" : "🚀"}
+                    </span>
+                    <span className="mt-1 block text-sm font-bold">{value ? t("board.start.prepare") : t("board.start.now")}</span>
+                    <span className="block text-xs text-muted">
+                      {value
+                        ? t("board.start.prepare.hint")
+                        : draft
+                          ? t("board.draft.missing", { count: missing })
+                          : t("board.start.now.hint")}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+        )}
+        <ModePicker value={mode} onChange={setMode} />
+        <EndRulePicker value={endRule} onChange={setEndRule} />
         <p className="mt-2 text-xs text-muted">{t("board.end.hint")}</p>
 
         <button
@@ -219,7 +220,7 @@ export function BoardActions({
           onClick={createGame}
           disabled={busy === "game"}
         >
-          {busy === "game" ? t("board.mode.starting") : t("board.mode.start")}
+          {busy === "game" ? t("board.mode.starting") : lobby ? t("board.start.prepare.submit") : t("board.mode.start")}
         </button>
       </BottomSheet>
     </>

@@ -84,6 +84,8 @@ export function useGame(publicGame: PublicGame) {
   const hiddenAtRef = useRef<number | null>(null);
   const noticeSeq = useRef(0);
   const boardLoaded = useRef(false);
+  const boardRef = useRef<BoardWithPhrases | null>(null);
+  const statusRef = useRef<Game["status"] | null>(null);
   // file d'écriture des coches du joueur courant
   const writeRef = useRef<{ inflight: boolean; dirty: boolean; local: boolean[] | null }>({
     inflight: false,
@@ -203,21 +205,34 @@ export function useGame(publicGame: PublicGame) {
     }
 
     setGame(loaded);
+    statusRef.current = loaded.status;
     applyPlayers(playersRes.data ?? [], "replace");
     setEvents(eventsRes.data ?? []);
     setClaims(claimsRes.data ?? []);
     setReactions(reactionsRes.data ?? []);
 
-    if (!boardLoaded.current) {
+    // en préparation, les phrases changent : on recharge le bingo à chaque fois
+    if (!boardLoaded.current || loaded.status === "lobby") {
       boardLoaded.current = true;
       fetchBoard(supabase, gameRes.data.board_id)
-        .then(setBoard)
+        .then((b) => {
+          boardRef.current = b;
+          setBoard(b);
+        })
         .catch(() => {
           boardLoaded.current = false;
         });
     }
     setPhase("ready");
   }, [supabase, gameId, applyPlayers]);
+
+  const reloadBoard = useCallback(async () => {
+    const b = await fetchBoard(supabase, publicGame.board_id).catch(() => null);
+    if (b) {
+      boardRef.current = b;
+      setBoard(b);
+    }
+  }, [supabase, publicGame.board_id]);
 
   const safeLoad = useCallback(async () => {
     try {
@@ -360,6 +375,15 @@ export function useGame(publicGame: PublicGame) {
           if (payload.eventType === "INSERT") applyClaim(payload.new, true);
         },
       )
+      // remise à zéro de la partie par l'hôte
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "game_claims" },
+        (payload: RealtimePostgresChangesPayload<GameClaim>) => {
+          const id = payload.old && "id" in payload.old ? payload.old.id : undefined;
+          if (id) setClaims((list) => list.filter((c) => c.id !== id));
+        },
+      )
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "game_claims", filter: `game_id=eq.${gameId}` },
@@ -388,7 +412,28 @@ export function useGame(publicGame: PublicGame) {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
         (payload: RealtimePostgresChangesPayload<Game>) => {
-          if (payload.eventType === "UPDATE") setGame(payload.new);
+          if (payload.eventType !== "UPDATE") return;
+          const changed = statusRef.current !== payload.new.status;
+          statusRef.current = payload.new.status;
+          setGame(payload.new);
+          // lancement de la partie : les grilles viennent d'être distribuées
+          if (changed) void safeLoad();
+        },
+      )
+      // salle de préparation : phrases ajoutées ou retirées par les membres
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "board_phrases", filter: `board_id=eq.${publicGame.board_id}` },
+        () => {
+          if (statusRef.current === "lobby") void reloadBoard();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "board_phrases" },
+        (payload: RealtimePostgresChangesPayload<{ id: string }>) => {
+          const id = payload.old && "id" in payload.old ? payload.old.id : undefined;
+          if (id && boardRef.current?.phrases.some((p) => p.id === id)) void reloadBoard();
         },
       )
       .on("presence", { event: "sync" }, () => {
@@ -410,7 +455,7 @@ export function useGame(publicGame: PublicGame) {
       });
 
     channelRef.current = channel;
-  }, [supabase, gameId, applyPlayers, applyClaim, removePlayer, safeLoad, flushChecks]);
+  }, [supabase, gameId, publicGame.board_id, applyPlayers, applyClaim, removePlayer, safeLoad, flushChecks, reloadBoard]);
 
   // chargement initial
   useEffect(() => {
@@ -670,6 +715,119 @@ export function useGame(publicGame: PublicGame) {
     [reactions, supabase, gameId, safeLoad, toast, t],
   );
 
+  // ------------------------------------------------------------------------
+  // Préparation (partie « lobby »)
+  // ------------------------------------------------------------------------
+
+  /** Proposer une phrase pour le bingo ; renvoie true si elle est ajoutée. */
+  const addPhrase = useCallback(
+    async (text: string): Promise<boolean> => {
+      const { data, error } = await supabase.rpc("add_lobby_phrase", { p_game_id: gameId, p_text: text });
+      if (error || !data) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        return false;
+      }
+      haptics.tap();
+      setBoard((b) => {
+        if (!b || b.phrases.some((p) => p.id === data.id)) return b;
+        const next = { ...b, phrases: [...b.phrases, data] };
+        boardRef.current = next;
+        return next;
+      });
+      return true;
+    },
+    [supabase, gameId, toast, t],
+  );
+
+  const removePhrase = useCallback(
+    async (phraseId: string) => {
+      setBoard((b) => {
+        if (!b) return b;
+        const next = { ...b, phrases: b.phrases.filter((p) => p.id !== phraseId) };
+        boardRef.current = next;
+        return next;
+      });
+      const { error } = await supabase.rpc("remove_lobby_phrase", { p_game_id: gameId, p_phrase_id: phraseId });
+      if (error) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        void reloadBoard();
+      }
+    },
+    [supabase, gameId, toast, t, reloadBoard],
+  );
+
+  /** L'hôte lance la partie : chacun reçoit sa grille. */
+  const startGame = useCallback(async (): Promise<boolean> => {
+    const { error } = await supabase.rpc("start_game", { p_game_id: gameId });
+    if (error) {
+      toast.show(t(errorKey(error)), { tone: "error" });
+      return false;
+    }
+    haptics.alert();
+    await safeLoad();
+    return true;
+  }, [supabase, gameId, toast, t, safeLoad]);
+
+  /** L'hôte change le mode (en préparation), la règle de fin ou la durée. */
+  const updateSettings = useCallback(
+    async (settings: { mode: Game["mode"]; autoEnd: Game["auto_end"]; durationDays: number | null; keepDeadline: boolean }) => {
+      const { data, error } = await supabase.rpc("update_game_settings", {
+        p_game_id: gameId,
+        p_mode: settings.mode,
+        p_auto_end: settings.autoEnd,
+        p_duration_days: settings.durationDays,
+        p_keep_deadline: settings.keepDeadline,
+      });
+      if (error || !data) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        return false;
+      }
+      statusRef.current = data.status;
+      setGame(data);
+      toast.show(t("game.settings.saved"), { tone: "success" });
+      return true;
+    },
+    [supabase, gameId, toast, t],
+  );
+
+  /** L'hôte remet la partie à zéro (option : nouvelles grilles pour tous). */
+  const resetGame = useCallback(
+    async (newGrids: boolean) => {
+      const { error } = await supabase.rpc("reset_game", { p_game_id: gameId, p_new_grids: newGrids });
+      if (error) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        return false;
+      }
+      haptics.alert();
+      await safeLoad();
+      toast.show(t("game.reset.done"), { tone: "success" });
+      return true;
+    },
+    [supabase, gameId, toast, t, safeLoad],
+  );
+
+  /** L'hôte remet la partie en préparation (brouillon) : grilles retirées, membres gardés. */
+  const reopenLobby = useCallback(async () => {
+    const { error } = await supabase.rpc("reopen_lobby", { p_game_id: gameId });
+    if (error) {
+      toast.show(t(errorKey(error)), { tone: "error" });
+      return false;
+    }
+    await safeLoad();
+    toast.show(t("game.reopen.done"), { tone: "success" });
+    return true;
+  }, [supabase, gameId, toast, t, safeLoad]);
+
+  /** L'hôte annule la préparation : la partie disparaît, les phrases restent dans le bingo. */
+  const cancelLobby = useCallback(async (): Promise<boolean> => {
+    const { error } = await supabase.from("games").delete().eq("id", gameId);
+    if (error) {
+      toast.show(t(errorKey(error)), { tone: "error" });
+      return false;
+    }
+    return true;
+  }, [supabase, gameId, toast, t]);
+
   const leave = useCallback(async () => {
     if (!me) return;
     const { error } = await supabase.from("game_players").delete().eq("id", me.id);
@@ -698,6 +856,13 @@ export function useGame(publicGame: PublicGame) {
     cancelClaim,
     reactions,
     toggleReaction,
+    addPhrase,
+    removePhrase,
+    startGame,
+    cancelLobby,
+    updateSettings,
+    resetGame,
+    reopenLobby,
     connection,
     online,
     notice,

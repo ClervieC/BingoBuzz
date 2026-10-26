@@ -4,13 +4,13 @@ import { getSupabaseAdminClient, secretMatches } from "@/lib/supabase/admin";
 
 /**
  * Appelée par la base (pg_net, voir migration 13) à chaque bingo,
- * proposition, résolution de proposition et fin de partie. Calcule les
+ * proposition, résolution de proposition, lancement et fin de partie. Calcule les
  * destinataires et envoie les notifications Web Push, dans la langue de
  * chaque appareil. Protégée par le secret partagé PUSH_WEBHOOK_SECRET.
  */
 
 type Payload = {
-  kind: "bingo" | "claim" | "claim_resolved" | "game_finished";
+  kind: "bingo" | "claim" | "claim_resolved" | "game_finished" | "game_started";
   game_id: string;
   player_id?: string;
   claim_id?: string;
@@ -92,6 +92,11 @@ export async function POST(request: Request) {
     case "game_finished":
       recipients = members;
       message = { title: "push.msg.finished.title", body: "push.msg.finished.body", vars: { title } };
+      break;
+    case "game_started":
+      // partie préparée ensemble : l'hôte vient de la lancer
+      recipients = members.filter((uid) => uid !== payload.actor_id);
+      message = { title: "push.msg.started.title", body: "push.msg.started.body", vars: { title } };
       break;
   }
   if (!message || recipients.length === 0) return Response.json({ sent: 0 });

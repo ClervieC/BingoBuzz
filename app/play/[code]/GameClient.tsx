@@ -15,6 +15,8 @@ import { ProposeSheet } from "@/components/ProposeSheet";
 import { PushPrompt } from "@/components/PushPrompt";
 import { ReactionBar } from "@/components/ReactionBar";
 import { Leaderboard, rankPlayers } from "@/components/Leaderboard";
+import { GameSettingsSheet } from "@/components/GameSettingsSheet";
+import { LobbyView } from "@/components/LobbyView";
 import { SharePanel } from "@/components/SharePanel";
 import { useToast } from "@/components/Toast";
 import { VictoryOverlay, victoryKindFromLine, type VictoryKind } from "@/components/Victory";
@@ -67,6 +69,7 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
   const [victory, setVictory] = useState<VictoryKind | null>(null);
   // mode groupe : case dont on prépare la proposition (fenêtre « J'ai vu ça ! »)
   const [proposing, setProposing] = useState<number | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const title = publicGame.title;
   const theme = publicGame.theme;
@@ -295,7 +298,10 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         <main className="page pb-safe stagger space-y-5 pt-4">
           {banner}
           <div className="card p-5">
-            <h2 className="mb-1 text-lg font-black">{t("game.join.title", { title })}</h2>
+            <h2 className="mb-1 text-lg font-black">
+              {publicGame.status === "lobby" ? t("lobby.join.title", { title }) : t("game.join.title", { title })}
+            </h2>
+            {publicGame.status === "lobby" && <p className="mb-2 text-sm">✍️ {t("lobby.join.hint")}</p>}
             <p className="mb-4 text-sm text-muted">
               {publicGame.grid_size}×{publicGame.grid_size} · {t("game.join.players", { count: publicGame.player_count })}
             </p>
@@ -311,10 +317,77 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
                 </a>
               </div>
             ) : (
-              <JoinForm onJoin={g.join} />
+              <JoinForm onJoin={g.join} submitLabel={publicGame.status === "lobby" ? t("lobby.join.submit") : undefined} />
             )}
           </div>
           {mode !== "free" && <p className="text-center text-sm text-muted">{t(MODE_HINT[mode])}</p>}
+        </main>
+      </div>
+    );
+  }
+
+  /** Paramètres de la partie (hôte) : réglages, bingo en brouillon, remise à zéro. */
+  const settingsSheet =
+    g.isHost && g.game ? (
+      <GameSettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        game={g.game}
+        editHref={
+          g.game.status === "lobby" && g.board?.owner_id === g.userId
+            ? `/boards/${publicGame.board_id}/edit?next=${encodeURIComponent(`/play/${publicGame.code}`)}`
+            : undefined
+        }
+        onSave={g.updateSettings}
+        onReset={g.resetGame}
+        onReopen={g.board?.owner_id === g.userId ? g.reopenLobby : undefined}
+      />
+    ) : null;
+
+  // ---- en préparation : phrases à ajouter, l'hôte lance ---------------------
+
+  if (g.game?.status === "lobby") {
+    return (
+      <div className="themed min-h-dvh" style={themeStyle(theme)}>
+        {header}
+        <main className="page pb-safe stagger space-y-4 pt-4 pb-12">
+          {banner}
+          <LobbyView
+            code={publicGame.code}
+            title={title}
+            board={g.board}
+            players={g.players}
+            userId={g.userId}
+            hostId={g.game.host_id}
+            isMember={Boolean(g.me)}
+            onAdd={g.addPhrase}
+            onRemove={(id) => void g.removePhrase(id)}
+            onStart={g.startGame}
+            onCancel={() =>
+              void g.cancelLobby().then((ok) => {
+                if (ok) window.location.assign(`/boards/${publicGame.board_id}`);
+              })
+            }
+            onJoin={g.join}
+            onLeave={() => void g.leave()}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+          <PushPrompt />
+        </main>
+        {settingsSheet}
+      </div>
+    );
+  }
+
+  // ---- lancement : les grilles arrivent (quelques instants) -----------------
+
+  if (me && me.grid.length === 0) {
+    return (
+      <div className="themed min-h-dvh" style={themeStyle(theme)}>
+        {header}
+        <main className="page space-y-4 pt-4" aria-busy="true" aria-label={t("common.loading")}>
+          {banner}
+          <div className="aspect-square w-full animate-pulse rounded-2xl bg-surface-2" />
         </main>
       </div>
     );
@@ -454,6 +527,20 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         {activeTab === "host" && g.game && (
           <>
             <p className="text-sm text-muted">{t("game.host.intro")}</p>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="card lift flex min-h-[64px] w-full items-center gap-3 p-3 text-left transition active:scale-[0.99]"
+            >
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Icon name="settings" size={22} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-extrabold">{t("game.settings")}</span>
+                <span className="block text-xs text-muted">{t("game.settings.hint")}</span>
+              </span>
+              <Icon name="back" size={18} className="rotate-180 text-muted" />
+            </button>
             {mode === "peer" && !finished && (
               <ClaimsPanel
                 claims={g.claims}
@@ -559,6 +646,7 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
       />
 
       <VictoryOverlay kind={victory} onClose={() => setVictory(null)} />
+      {settingsSheet}
     </div>
   );
 }

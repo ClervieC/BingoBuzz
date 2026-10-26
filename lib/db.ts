@@ -21,7 +21,7 @@ export async function fetchBoard(supabase: Client, id: string): Promise<BoardWit
     supabase.from("boards").select(BOARD_COLUMNS).eq("id", id).maybeSingle(),
     supabase
       .from("board_phrases")
-      .select("id, text, position")
+      .select("id, text, position, added_by")
       .eq("board_id", id)
       .order("position")
       .order("id"),
@@ -72,6 +72,8 @@ export interface ActiveGame {
   title: string;
   theme: Board["theme"];
   createdAt: string;
+  /** en préparation : pas encore de grille */
+  lobby: boolean;
   /** progression du joueur courant (null s'il n'a pas de grille, ex. hôte qui ne joue pas) */
   me: { count: number; total: number; missing: number; hasBingo: boolean } | null;
 }
@@ -83,8 +85,8 @@ export interface ActiveGame {
 export async function fetchActiveGames(supabase: Client, userId: string): Promise<ActiveGame[]> {
   const { data: games, error } = await supabase
     .from("games")
-    .select("id, code, host_id, board_id, created_at")
-    .eq("status", "playing")
+    .select("id, code, host_id, board_id, created_at, status")
+    .in("status", ["lobby", "playing"])
     .order("created_at", { ascending: false })
     .limit(10);
   if (error) throw error;
@@ -105,7 +107,9 @@ export async function fetchActiveGames(supabase: Client, userId: string): Promis
     const board = boardById.get(g.board_id);
     if (!board) return [];
     const player = playerByGame.get(g.id);
-    const me = player
+    // en préparation, le joueur n'a pas encore de grille
+    const me =
+      player && player.grid.length > 0
       ? {
           count: countChecked(player.checked),
           total: player.grid.length,
@@ -113,7 +117,17 @@ export async function fetchActiveGames(supabase: Client, userId: string): Promis
           hasBingo: player.has_bingo,
         }
       : null;
-    return [{ code: g.code, isHost: g.host_id === userId, title: board.title, theme: board.theme, createdAt: g.created_at, me }];
+    return [
+      {
+        code: g.code,
+        isHost: g.host_id === userId,
+        title: board.title,
+        theme: board.theme,
+        createdAt: g.created_at,
+        lobby: g.status === "lobby",
+        me,
+      },
+    ];
   });
 }
 

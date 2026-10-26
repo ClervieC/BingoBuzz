@@ -36,6 +36,7 @@ type BoardPhraseRow = {
   text: string;
   position: number;
   created_at: string;
+  added_by: string | null;
 };
 
 type GameRow = {
@@ -49,6 +50,7 @@ type GameRow = {
   ended_at: string | null;
   auto_end: GameAutoEnd;
   ends_at: string | null;
+  duration_days: number | null;
 };
 
 type GamePlayerRow = {
@@ -201,8 +203,44 @@ export type Database = {
         Returns: string;
       };
       create_game: {
-        Args: { p_board_id: string; p_mode?: GameMode; p_auto_end?: GameAutoEnd; p_duration_days?: number | null };
+        Args: {
+          p_board_id: string;
+          p_mode?: GameMode;
+          p_auto_end?: GameAutoEnd;
+          p_duration_days?: number | null;
+          p_lobby?: boolean;
+        };
         Returns: GameRow;
+      };
+      start_game: {
+        Args: { p_game_id: string };
+        Returns: GameRow;
+      };
+      update_game_settings: {
+        Args: {
+          p_game_id: string;
+          p_mode: GameMode;
+          p_auto_end: GameAutoEnd;
+          p_duration_days?: number | null;
+          p_keep_deadline?: boolean;
+        };
+        Returns: GameRow;
+      };
+      reset_game: {
+        Args: { p_game_id: string; p_new_grids?: boolean };
+        Returns: GameRow;
+      };
+      reopen_lobby: {
+        Args: { p_game_id: string };
+        Returns: GameRow;
+      };
+      add_lobby_phrase: {
+        Args: { p_game_id: string; p_text: string };
+        Returns: BoardPhraseRow;
+      };
+      remove_lobby_phrase: {
+        Args: { p_game_id: string; p_phrase_id: string };
+        Returns: undefined;
       };
       join_game: {
         Args: { p_code: string; p_nickname: string };

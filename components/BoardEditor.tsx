@@ -124,11 +124,7 @@ export function BoardEditor({
       setError(t("editor.errors.title"));
       return;
     }
-    if (missing > 0) {
-      setError(t("editor.errors.phrases", { required, size: gridSize }));
-      return;
-    }
-
+    // il manque des phrases : enregistré en brouillon, à compléter seul ou avec les invités
     setSaving(true);
     try {
       await requireUser();
@@ -450,9 +446,14 @@ export function BoardEditor({
               {error}
             </p>
           )}
+          {missing > 0 && !error && (
+            <p className="mb-2 text-center text-xs font-semibold text-muted">
+              {t("editor.draft.hint", { count: missing })}
+            </p>
+          )}
           <button type="button" className="btn btn-primary w-full" onClick={save} disabled={saving}>
             {missing === 0 && <span aria-hidden>🎉</span>}
-            {saving ? t("editor.saving") : t("editor.save")}
+            {saving ? t("editor.saving") : missing > 0 ? t("editor.saveDraft") : t("editor.save")}
           </button>
         </div>
       </div>
