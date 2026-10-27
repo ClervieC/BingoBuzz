@@ -35,7 +35,7 @@ export function BoardActions({
   const router = useRouter();
   const [sheet, setSheet] = useState(false);
   const [mode, setMode] = useState<GameMode>("free");
-  const [endRule, setEndRule] = useState<EndRule>("manual");
+  const [endRule, setEndRule] = useState<EndRule>("progressive");
   // préparer avec le groupe : seul le propriétaire (les invités écrivent dans le bingo)
   const canPrepare = isOwner && !isTemplate;
   const draft = missing > 0;

@@ -38,6 +38,8 @@ export interface ClaimNotice {
 export interface BingoNotice {
   seq: number;
   player: GamePlayer;
+  /** 1 : bingo, 2 : double bingo, 3 : carton plein */
+  stage: 1 | 2 | 3;
 }
 
 /** Au-delà de cette absence (onglet masqué, téléphone en veille), on recrée le canal. */
@@ -67,7 +69,7 @@ export function useGame(publicGame: PublicGame) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<GamePlayer[]>([]);
   const [events, setEvents] = useState<GameEvent[]>([]);
-  // propositions en attente + confirmées avec photo (mode « peer »)
+  // propositions en attente + confirmées (mode « peer » : à confirmer, galerie, fil, récap)
   const [claims, setClaims] = useState<GameClaim[]>([]);
   const [reactions, setReactions] = useState<GameReaction[]>([]);
   const [board, setBoard] = useState<BoardWithPhrases | null>(null);
@@ -106,7 +108,15 @@ export function useGame(publicGame: PublicGame) {
       next = incoming;
     } else {
       const byId = new Map(prev.map((p) => [p.id, p]));
-      for (const p of incoming) byId.set(p.id, p);
+      // Realtime omet les colonnes volumineuses inchangées (ex. grid quand seul
+      // checked change) : on complète avec la version connue du joueur.
+      for (const p of incoming) {
+        const known = byId.get(p.id);
+        const defined = Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) as Partial<GamePlayer>;
+        // joueur inconnu et incomplet : le prochain rechargement complet l'apportera
+        if (!known && !Array.isArray(p.grid)) continue;
+        byId.set(p.id, known ? { ...known, ...defined } : p);
+      }
       next = [...byId.values()];
     }
 
@@ -118,9 +128,11 @@ export function useGame(publicGame: PublicGame) {
 
     for (const p of next) {
       const before = prevById.get(p.id);
-      if (p.user_id !== me && p.has_bingo && before && !before.has_bingo) {
-        setNotice({ seq: ++noticeSeq.current, player: p });
-      }
+      if (p.user_id === me || !before) continue;
+      // un seul palier annoncé à la fois : le plus haut atteint
+      if (p.full_at && !before.full_at) setNotice({ seq: ++noticeSeq.current, player: p, stage: 3 });
+      else if (p.double_at && !before.double_at) setNotice({ seq: ++noticeSeq.current, player: p, stage: 2 });
+      else if (p.has_bingo && !before.has_bingo) setNotice({ seq: ++noticeSeq.current, player: p, stage: 1 });
     }
 
     next.sort((a, b) => a.joined_at.localeCompare(b.joined_at));
@@ -136,10 +148,12 @@ export function useGame(publicGame: PublicGame) {
       if (isNew && claim.claimed_by !== me) setClaimNotice({ seq: ++claimSeq.current, kind: "new", claim });
       return;
     }
-    // confirmée avec photo : reste dans la galerie ; sinon elle disparaît
+    // confirmée : reste (galerie, fil de la partie) ; contestée : disparaît
     setClaims((list) =>
-      claim.status === "confirmed" && claim.photo_path
-        ? list.map((c) => (c.id === claim.id ? claim : c))
+      claim.status === "confirmed"
+        ? list.some((c) => c.id === claim.id)
+          ? list.map((c) => (c.id === claim.id ? claim : c))
+          : [...list, claim]
         : list.filter((c) => c.id !== claim.id),
     );
     // ma proposition contestée : sa photo n'a plus de raison d'être conservée
@@ -178,12 +192,12 @@ export function useGame(publicGame: PublicGame) {
       supabase.from("games").select("*").eq("id", gameId).maybeSingle(),
       supabase.from("game_players").select("*").eq("game_id", gameId),
       supabase.from("game_events").select("*").eq("game_id", gameId),
-      // en attente (à confirmer) + confirmées avec photo (galerie des preuves)
+      // en attente (à confirmer) + confirmées (galerie des preuves, fil de la partie)
       supabase
         .from("game_claims")
         .select("*")
         .eq("game_id", gameId)
-        .or("status.eq.pending,and(status.eq.confirmed,photo_path.not.is.null)")
+        .in("status", ["pending", "confirmed"])
         .order("created_at", { ascending: false }),
       supabase.from("game_reactions").select("*").eq("game_id", gameId),
     ]);
@@ -430,6 +444,13 @@ export function useGame(publicGame: PublicGame) {
       )
       .on(
         "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "board_phrases", filter: `board_id=eq.${publicGame.board_id}` },
+        () => {
+          if (statusRef.current === "lobby") void reloadBoard();
+        },
+      )
+      .on(
+        "postgres_changes",
         { event: "DELETE", schema: "public", table: "board_phrases" },
         (payload: RealtimePostgresChangesPayload<{ id: string }>) => {
           const id = payload.old && "id" in payload.old ? payload.old.id : undefined;
@@ -529,9 +550,13 @@ export function useGame(publicGame: PublicGame) {
   const isHost = Boolean(game && userId && game.host_id === userId);
 
   const join = useCallback(
-    async (nickname: string) => {
+    async (nickname: string, avatar?: string) => {
       await requireUser();
-      const { error } = await supabase.rpc("join_game", { p_code: publicGame.code, p_nickname: nickname });
+      const { error } = await supabase.rpc("join_game", {
+        p_code: publicGame.code,
+        p_nickname: nickname,
+        p_avatar: avatar ?? null,
+      });
       if (error) throw error;
       await load();
     },
@@ -603,7 +628,11 @@ export function useGame(publicGame: PublicGame) {
       // sort tout de suite de « À confirmer » ; la galerie se met à jour via le temps réel
       setClaims((list) =>
         list.flatMap((c) =>
-          c.id !== claimId ? [c] : accept && c.photo_path ? [{ ...c, status: "confirmed" as const }] : [],
+          c.id !== claimId
+            ? [c]
+            : accept
+              ? [{ ...c, status: "confirmed" as const, resolved_by: userIdRef.current, resolved_at: new Date().toISOString() }]
+              : [],
         ),
       );
       const { error } = await supabase.rpc("resolve_claim", { p_claim_id: claimId, p_accept: accept });
@@ -756,6 +785,29 @@ export function useGame(publicGame: PublicGame) {
     [supabase, gameId, toast, t, reloadBoard],
   );
 
+  /** Modifier une phrase proposée (l'hôte toutes, chacun les siennes). */
+  const editPhrase = useCallback(
+    async (phraseId: string, text: string): Promise<boolean> => {
+      const { data, error } = await supabase.rpc("edit_lobby_phrase", {
+        p_game_id: gameId,
+        p_phrase_id: phraseId,
+        p_text: text,
+      });
+      if (error || !data) {
+        toast.show(t(errorKey(error)), { tone: "error" });
+        return false;
+      }
+      setBoard((b) => {
+        if (!b) return b;
+        const next = { ...b, phrases: b.phrases.map((p) => (p.id === data.id ? { ...p, text: data.text } : p)) };
+        boardRef.current = next;
+        return next;
+      });
+      return true;
+    },
+    [supabase, gameId, toast, t],
+  );
+
   /** L'hôte lance la partie : chacun reçoit sa grille. */
   const startGame = useCallback(async (): Promise<boolean> => {
     const { error } = await supabase.rpc("start_game", { p_game_id: gameId });
@@ -858,6 +910,7 @@ export function useGame(publicGame: PublicGame) {
     toggleReaction,
     addPhrase,
     removePhrase,
+    editPhrase,
     startGame,
     cancelLobby,
     updateSettings,

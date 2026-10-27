@@ -8,6 +8,7 @@ import { BottomSheet } from "./BottomSheet";
 import { useT } from "./I18nProvider";
 import { Icon } from "./Icon";
 import { JoinForm } from "./JoinForm";
+import { PlayerAvatar } from "./PlayerAvatar";
 import { SharePanel } from "./SharePanel";
 
 /**
@@ -24,6 +25,7 @@ export function LobbyView({
   isMember,
   onAdd,
   onRemove,
+  onEdit,
   onStart,
   onCancel,
   onJoin,
@@ -40,9 +42,11 @@ export function LobbyView({
   isMember: boolean;
   onAdd: (text: string) => Promise<boolean>;
   onRemove: (phraseId: string) => void;
+  /** modifier une phrase (l'hôte toutes, chacun les siennes) ; true si enregistrée */
+  onEdit: (phraseId: string, text: string) => Promise<boolean>;
   onStart: () => Promise<boolean>;
   onCancel: () => void;
-  onJoin: (nickname: string) => Promise<void>;
+  onJoin: (nickname: string, avatar: string) => Promise<void>;
   onLeave: () => void;
   /** hôte : mode, fin, durée, modification du bingo */
   onOpenSettings: () => void;
@@ -50,9 +54,12 @@ export function LobbyView({
   const t = useT();
   const inputId = useId();
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [adding, setAdding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const me = players.find((p) => p.user_id === userId) ?? null;
 
   const isHost = userId === hostId;
   const phrases = board?.phrases ?? [];
@@ -141,6 +148,39 @@ export function LobbyView({
               const author = phrase.added_by && phrase.added_by !== hostId ? nameOf(phrase.added_by) : null;
               const mine = phrase.added_by === userId;
               const removable = isHost || mine;
+              if (editing?.id === phrase.id) {
+                return (
+                  <li key={phrase.id} className="px-3 py-2">
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const text = editing.text.trim();
+                        if (!text || text === phrase.text || (await onEdit(phrase.id, text))) setEditing(null);
+                      }}
+                    >
+                      <input
+                        className="input min-w-0 flex-1 py-2 text-sm"
+                        value={editing.text}
+                        onChange={(e) => setEditing({ id: phrase.id, text: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setEditing(null);
+                        }}
+                        maxLength={120}
+                        aria-label={t("lobby.edit", { text: phrase.text })}
+                        autoFocus
+                        enterKeyHint="done"
+                      />
+                      <button type="submit" className="icon-btn shrink-0 text-accent" aria-label={t("common.save")}>
+                        <Icon name="check" size={20} strokeWidth={3} />
+                      </button>
+                      <button type="button" className="icon-btn -mr-1 shrink-0 text-muted" aria-label={t("common.close")} onClick={() => setEditing(null)}>
+                        <Icon name="close" size={18} />
+                      </button>
+                    </form>
+                  </li>
+                );
+              }
               return (
                 <li key={phrase.id} className="animate-rise flex min-h-[48px] items-center gap-2 px-3 py-2">
                   <span className="min-w-0 flex-1 text-sm font-semibold">{frenchSpacing(phrase.text)}</span>
@@ -148,6 +188,16 @@ export function LobbyView({
                     <span className={`chip shrink-0 ${mine ? "" : "bg-surface-2 text-muted"}`}>
                       {mine ? t("game.ranking.you") : author}
                     </span>
+                  )}
+                  {removable && (
+                    <button
+                      type="button"
+                      className="icon-btn shrink-0 text-muted"
+                      aria-label={t("lobby.edit", { text: phrase.text })}
+                      onClick={() => setEditing({ id: phrase.id, text: phrase.text })}
+                    >
+                      <Icon name="edit" size={18} />
+                    </button>
                   )}
                   {removable && (
                     <button
@@ -179,14 +229,33 @@ export function LobbyView({
           <p className="text-sm text-muted">{t("lobby.members.empty")}</p>
         ) : (
           <ul className="flex flex-wrap gap-2">
-            {players.map((p) => (
-              <li key={p.id} className="animate-bounce-in chip">
-                {p.nickname}
-                {p.user_id === hostId && <span aria-hidden> 👑</span>}
-              </li>
-            ))}
+            {players.map((p) =>
+              p.user_id === userId ? (
+                // moi : touche pour changer de pseudo ou d'emoji tant que la partie n'a pas commencé
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => setProfileOpen(true)}
+                    className="animate-bounce-in chip gap-1.5 pl-1 ring-2 ring-accent"
+                    aria-label={t("lobby.profile.edit")}
+                  >
+                    <PlayerAvatar userId={p.user_id} avatar={p.avatar} size={24} />
+                    {p.nickname}
+                    {p.user_id === hostId && <span aria-hidden> 👑</span>}
+                    <Icon name="edit" size={14} />
+                  </button>
+                </li>
+              ) : (
+                <li key={p.id} className="animate-bounce-in chip gap-1.5 pl-1">
+                  <PlayerAvatar userId={p.user_id} avatar={p.avatar} size={24} />
+                  {p.nickname}
+                  {p.user_id === hostId && <span aria-hidden> 👑</span>}
+                </li>
+              ),
+            )}
           </ul>
         )}
+        {me && <p className="mt-2 text-xs text-muted">{t("lobby.profile.hint")}</p>}
       </section>
 
       {/* hôte : jouer aussi, lancer, annuler */}
@@ -242,6 +311,20 @@ export function LobbyView({
           </button>
         </div>
       )}
+
+      <BottomSheet open={profileOpen && me !== null} onClose={() => setProfileOpen(false)} title={t("lobby.profile.edit")}>
+        {me && (
+          <JoinForm
+            initialNickname={me.nickname}
+            initialAvatar={me.avatar}
+            submitLabel={t("common.save")}
+            onJoin={async (name, avatar) => {
+              await onJoin(name, avatar);
+              setProfileOpen(false);
+            }}
+          />
+        )}
+      </BottomSheet>
 
       <BottomSheet open={inviteOpen} onClose={() => setInviteOpen(false)} title={t("game.share.title")}>
         <SharePanel code={code} title={title} />

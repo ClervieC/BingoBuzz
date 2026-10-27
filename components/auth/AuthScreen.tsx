@@ -4,6 +4,7 @@ import { Logo } from "@/components/Logo";
 import { CompactPreferences } from "@/components/PreferenceControls";
 import type { Translator } from "@/lib/i18n";
 import { AuthHero, AuthPoints } from "./AuthHero";
+import { AuthShowcase } from "./AuthShowcase";
 
 /**
  * Écran d'accueil sans compte : accroche + connexion / inscription.
@@ -49,6 +50,11 @@ export function AuthScreen({
           <AuthPoints t={t} />
         </div>
       </main>
+
+      {/* sous le formulaire : on découvre le jeu en faisant défiler */}
+      <div className="border-t border-border/70 bg-surface/40">
+        <AuthShowcase t={t} />
+      </div>
 
       <footer className="pb-safe border-t border-border/70">
         <div className="page flex flex-col items-center gap-2 py-5 text-sm text-muted sm:flex-row sm:justify-between lg:max-w-6xl">

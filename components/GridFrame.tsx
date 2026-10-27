@@ -12,7 +12,7 @@ export const GridFrame = forwardRef<
   { title: string; theme: BoardTheme; subtitle?: ReactNode; children: ReactNode }
 >(function GridFrame({ title, theme, subtitle, children }, ref) {
   return (
-    <div ref={ref} className="themed rounded-3xl bg-bg py-3" style={themeStyle(theme)}>
+    <div ref={ref} className="themed rounded-3xl bg-bg py-3" style={themeStyle(theme)} data-card={theme.style}>
       <div className="mb-3 flex items-center gap-3">
         <span
           aria-hidden

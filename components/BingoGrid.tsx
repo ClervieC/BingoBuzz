@@ -47,7 +47,7 @@ export function BingoGrid({
       <div
         role="group"
         aria-label={t("grid.label", { size })}
-        className="mx-auto grid aspect-square gap-1.5 sm:gap-2"
+        className="bingo-board mx-auto grid aspect-square gap-1.5 sm:gap-2"
         style={{
           gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
           // pleine largeur sur mobile, mais toujours visible en entier en hauteur

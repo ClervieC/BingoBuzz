@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
-import { BoardTile } from "@/components/BoardTile";
 import { HeaderNav } from "@/components/HeaderNav";
 import { Icon } from "@/components/Icon";
 import { fetchFinishedGames, fetchOwnBoards, fetchTemplates } from "@/lib/db";
@@ -9,6 +8,7 @@ import { themeStyle } from "@/lib/themes";
 import { getT } from "@/lib/i18n/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getServerUser } from "@/lib/supabase/user";
+import { TemplateGallery } from "@/components/TemplateGallery";
 import { LibraryGrid } from "./LibraryGrid";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -107,13 +107,7 @@ export default async function LibraryPage() {
           <section>
             <h2 className="text-lg font-extrabold">{t("library.templates")}</h2>
             <p className="mb-3 text-sm text-muted">{t("library.templates.hint")}</p>
-            <ul className="stagger grid grid-cols-2 gap-3 sm:grid-cols-3 max-sm:[&>li:last-child:nth-child(odd)]:col-span-2">
-              {templates.map((board) => (
-                <li key={board.id}>
-                  <BoardTile board={board} />
-                </li>
-              ))}
-            </ul>
+            <TemplateGallery templates={templates} />
           </section>
         )}
       </main>

@@ -7,7 +7,12 @@ import type { LineKind } from "@/lib/bingo";
 import type { MessageKey } from "@/lib/i18n";
 import { useT } from "./I18nProvider";
 
-export type VictoryKind = "row" | "column" | "diagonal" | "full";
+export type VictoryKind = "row" | "column" | "diagonal" | "double" | "full";
+
+/** Palier atteint : 0 rien, 1 une ligne, 2 deux lignes, 3 grille complète. */
+export function victoryStage(lines: number, isFullCard: boolean): 0 | 1 | 2 | 3 {
+  return isFullCard ? 3 : lines >= 2 ? 2 : lines >= 1 ? 1 : 0;
+}
 
 export function victoryKindFromLine(kind: LineKind): VictoryKind {
   return kind === "antiDiagonal" ? "diagonal" : kind;
@@ -17,6 +22,7 @@ const TITLES: Record<VictoryKind, MessageKey> = {
   row: "victory.row",
   column: "victory.column",
   diagonal: "victory.diagonal",
+  double: "victory.double.sub",
   full: "victory.full",
 };
 
@@ -54,10 +60,10 @@ export function VictoryOverlay({
         onClick={(e) => e.stopPropagation()}
       >
         <p className="text-6xl" aria-hidden>
-          {kind === "full" ? "🏆" : "🎉"}
+          {kind === "full" ? "🏆" : kind === "double" ? "🔥" : "🎉"}
         </p>
         <h2 id="victory-title" className="mt-3 text-4xl font-black tracking-tight text-accent">
-          {kind === "full" ? t("victory.full") : t("victory.bingo")}
+          {kind === "full" ? t("victory.full") : kind === "double" ? t("victory.double") : t("victory.bingo")}
         </h2>
         {kind !== "full" && <p className="mt-1 text-lg font-semibold text-muted">{t(TITLES[kind])}</p>}
         <div className="mt-6 flex flex-col gap-3">

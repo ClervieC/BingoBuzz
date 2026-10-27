@@ -8,7 +8,7 @@ import { cleanPhrase, isDuplicate, MAX_PHRASES, parsePhrases } from "@/lib/phras
 import { centerIndex, hasFreeCenter, requiredPhraseCount } from "@/lib/random";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { THEME_COLOR_NAMES, THEME_COLORS, THEME_EMOJIS, themeStyle } from "@/lib/themes";
-import type { BoardWithPhrases, GridSize, ThemeColor } from "@/types/bingo";
+import { CARD_STYLES, type BoardWithPhrases, type CardStyle, type GridSize, type ThemeColor } from "@/types/bingo";
 import { BottomSheet } from "./BottomSheet";
 import { useT } from "./I18nProvider";
 import { Icon } from "./Icon";
@@ -62,6 +62,7 @@ export function BoardEditor({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [emoji, setEmoji] = useState(initial?.theme.emoji ?? THEME_EMOJIS[0]);
   const [color, setColor] = useState<ThemeColor>(initial?.theme.color ?? "violet");
+  const [cardStyle, setCardStyle] = useState<CardStyle>(initial?.theme.style ?? "classic");
   const [gridSize, setGridSize] = useState<GridSize>(initial?.grid_size ?? 5);
   const [freeCenter, setFreeCenter] = useState(initial?.free_center ?? true);
   const [phrases, setPhrases] = useState<string[]>(initial?.phrases.map((p) => p.text) ?? []);
@@ -132,7 +133,7 @@ export function BoardEditor({
       const { data: id, error: rpcError } = await supabase.rpc("save_board", {
         p_id: initial?.id ?? null,
         p_title: title.trim().slice(0, 80),
-        p_theme: { emoji, color },
+        p_theme: { emoji, color, style: cardStyle },
         p_grid_size: gridSize,
         p_free_center: free,
         p_phrases: phrases,
@@ -251,6 +252,32 @@ export function BoardEditor({
                 style={{ background: THEME_COLORS[name].light }}
               >
                 {color === name && <Icon name="check" size={20} className="animate-bounce-in text-white" />}
+              </button>
+            ))}
+          </div>
+
+          <p className="label mt-4">{t("editor.cardStyle")}</p>
+          <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label={t("editor.cardStyle")}>
+            {CARD_STYLES.map((style) => (
+              <button
+                key={style}
+                type="button"
+                role="radio"
+                aria-checked={cardStyle === style}
+                onClick={() => setCardStyle(style)}
+                data-card={style}
+                className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 p-2 text-xs font-bold transition active:scale-95 ${
+                  cardStyle === style ? "border-accent bg-accent-soft" : "border-border bg-surface"
+                }`}
+              >
+                <span aria-hidden className="bingo-board grid w-full grid-cols-2 gap-1 rounded-lg">
+                  {["idle", "checked", "free", "idle"].map((state, i) => (
+                    <span key={i} data-state={state} className={`bingo-cell block aspect-square rounded-md border ${
+                      state === "free" ? "border-transparent bg-accent" : state === "checked" ? "border-accent/50 bg-accent-soft" : "border-border bg-surface"
+                    }`} />
+                  ))}
+                </span>
+                {t(`editor.cardStyle.${style}`)}
               </button>
             ))}
           </div>

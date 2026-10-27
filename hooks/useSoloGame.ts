@@ -6,7 +6,7 @@ import { haptics } from "@/lib/haptics";
 import { buildGrid, initialChecked, randomSeed } from "@/lib/random";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
 import type { BoardWithPhrases, Cell } from "@/types/bingo";
-import { victoryKindFromLine, type VictoryKind } from "@/components/Victory";
+import { victoryKindFromLine, victoryStage, type VictoryKind } from "@/components/Victory";
 
 interface SavedSolo {
   v: 1;
@@ -81,18 +81,19 @@ export function useSoloGame(board: BoardWithPhrases) {
       const next = detectBingo(checked, board.grid_size);
       let { celebratedLines, celebratedFull } = state;
 
-      if (next.isFullCard && !celebratedFull) {
-        celebratedFull = true;
-        celebratedLines = next.lines.length;
-        setVictory("full");
-      } else if (next.lines.length > celebratedLines) {
-        // la ligne nouvellement complétée contient forcément la case touchée
-        const line = next.lines.find((l) => l.cells.includes(index)) ?? next.lines[0];
-        celebratedLines = next.lines.length;
-        setVictory(victoryKindFromLine(line.kind));
-      } else {
-        celebratedLines = Math.min(celebratedLines, next.lines.length);
-        if (!next.isFullCard) celebratedFull = false;
+      // trois célébrations : 1 ligne, 2 lignes, grille complète (une fois chacune)
+      const stage = victoryStage(next.lines.length, next.isFullCard);
+      const celebrated = celebratedFull ? 3 : Math.min(celebratedLines, 2);
+      if (stage > celebrated) {
+        if (stage === 3) setVictory("full");
+        else if (stage === 2) setVictory("double");
+        else {
+          // la ligne nouvellement complétée contient forcément la case touchée
+          const line = next.lines.find((l) => l.cells.includes(index)) ?? next.lines[0];
+          setVictory(victoryKindFromLine(line.kind));
+        }
+        celebratedLines = Math.max(celebratedLines, Math.min(next.lines.length, 2));
+        celebratedFull = celebratedFull || next.isFullCard;
       }
 
       setState({ ...state, checked, celebratedLines, celebratedFull });

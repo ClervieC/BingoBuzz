@@ -5,14 +5,23 @@ export type ClaimStatus = "pending" | "confirmed" | "rejected";
 /** lobby : en préparation (les invités ajoutent des phrases, pas encore de grille) */
 export type GameStatus = "lobby" | "playing" | "finished";
 /** fin automatique choisie par l'hôte */
-export type GameAutoEnd = "manual" | "first_bingo" | "full_card";
+/** progressive : 1 ligne (bingo), 2 lignes (double), carton plein qui termine la partie */
+export type GameAutoEnd = "manual" | "first_bingo" | "full_card" | "progressive";
 export const REACTION_EMOJIS = ["😂", "🔥", "👏", "😮", "❤️"] as const;
 export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 
 export interface BoardTheme {
   emoji: string;
   color: ThemeColor;
+  /** style de carte (absent : classique) */
+  style?: CardStyle;
 }
+
+export const CARD_STYLES = ["classic", "paper", "neon", "minimal"] as const;
+export type CardStyle = (typeof CARD_STYLES)[number];
+
+export const TEMPLATE_CATEGORIES = ["work", "party", "family", "sport", "tv", "travel"] as const;
+export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number];
 
 export type ThemeColor =
   | "violet"
@@ -49,6 +58,8 @@ export interface Board {
   is_template: boolean;
   created_at: string;
   updated_at: string;
+  /** modèles : catégorie de la galerie */
+  category?: TemplateCategory | null;
 }
 
 export interface BoardWithPhrases extends Board {
@@ -81,6 +92,12 @@ export interface GamePlayer {
   has_bingo: boolean;
   bingo_at: string | null;
   joined_at: string;
+  /** emoji choisi en rejoignant */
+  avatar?: string | null;
+  /** lignes complètes et paliers (calculés par la base) */
+  lines?: number;
+  double_at?: string | null;
+  full_at?: string | null;
 }
 
 export interface GameEvent {
@@ -108,7 +125,8 @@ export interface GameClaim {
 export interface GameReaction {
   id: string;
   game_id: string;
-  target_type: "bingo" | "claim";
+  /** joueur (classement, arrivée, paliers), proposition ou validation de l'hôte */
+  target_type: "player" | "join" | "bingo" | "double" | "full" | "claim" | "event";
   target_id: string;
   user_id: string;
   emoji: ReactionEmoji;
@@ -126,4 +144,22 @@ export interface PublicGame {
   grid_size: GridSize;
   player_count: number;
   created_at: string;
+}
+
+/** Statistiques du joueur (get_my_stats) */
+export interface PlayerStats {
+  games_played: number;
+  bingos: number;
+  wins: number;
+  full_cards: number;
+  cells_checked: number;
+  hosted: number;
+  boards: number;
+  claims_confirmed: number;
+  photos: number;
+  confirmations_given: number;
+  phrases_contributed: number;
+  reactions_received: number;
+  friends: number;
+  since: string | null;
 }

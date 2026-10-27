@@ -64,9 +64,12 @@ const dir = join(ROOT, "supabase/migrations");
 for (const file of readdirSync(dir).sort()) {
   await db.exec(readFileSync(join(dir, file), "utf8"));
   console.log("migration OK :", file);
+  // ces migrations doivent pouvoir être relancées (base partiellement migrée)
+  if (file.endsWith("_lobby.sql") || file.endsWith("_fun.sql") || file.endsWith("_progressive.sql") || file.endsWith("_reactions_everywhere.sql")) {
+    await db.exec(readFileSync(join(dir, file), "utf8"));
+    console.log("migration ré-exécutée sans erreur :", file);
+  }
 }
-await db.exec(readFileSync(join(dir, "20261027000015_lobby.sql"), "utf8"));
-console.log("migration ré-exécutée sans erreur : 20261027000015_lobby.sql");
 
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
@@ -369,8 +372,8 @@ await expectError(
 // --- anonyme / modèles -----------------------------------------------------------
 console.log("\nAccès public et modèles");
 await as("anon");
-ok((await q("select * from public.boards where is_template and locale = 'fr'")).length === 5, "anon lit les 5 modèles français");
-ok((await q("select * from public.boards where is_template and locale = 'en'")).length === 5, "… et les 5 modèles anglais");
+ok((await q("select * from public.boards where is_template and locale = 'fr'")).length === 10, "anon lit les 10 modèles français");
+ok((await q("select * from public.boards where is_template and locale = 'en'")).length === 10, "… et les 10 modèles anglais");
 const [pub] = await q("select * from public.get_game_public($1)", [vgame.code]);
 ok(pub.player_count === 2 && pub.title === "Test 2", "get_game_public accessible sans session");
 await expectError(q("select * from public.games"), /permission denied/, "anon ne lit pas les parties");
@@ -578,6 +581,89 @@ const [relaunched] = await q("select * from public.start_game($1)", [running.id]
 const [afterRelaunch] = await q("select * from public.game_players where id = $1", [runningB.id]);
 ok(relaunched.status === "playing" && afterRelaunch.grid.length === 9, "relancée avec de nouvelles grilles");
 await expectError(q("select * from public.reopen_lobby($1)", [auto.id]), /lobby_template/, "pas de préparation sur un modèle partagé");
+
+// --- Avatars, statistiques, catégories ---------------------------------------------
+console.log("\nAvatars, statistiques, catégories");
+await as(D);
+const [withAvatar] = await q("select * from public.join_game($1, 'Dan', '🦊')", [running.code]);
+ok(withAvatar.avatar === "🦊", "on rejoint avec un avatar");
+const [keptAvatar] = await q("select * from public.join_game($1, 'Danou')", [running.code]);
+ok(keptAvatar.avatar === "🦊" && keptAvatar.nickname === "Danou", "changer de pseudo garde l'avatar");
+const [{ s: statsD }] = await q("select public.get_my_stats() as s");
+ok(statsD.games_played >= 1 && statsD.phrases_contributed >= 1 && "wins" in statsD && "friends" in statsD, "statistiques du joueur");
+await as("anon");
+await expectError(q("select public.get_my_stats()"), /permission denied/, "statistiques réservées au compte connecté");
+ok(
+  (await q("select * from public.boards where is_template and category is null")).length === 0,
+  "chaque modèle a une catégorie",
+);
+const tplCounts = await q(
+  "select b.title, count(p.*)::int as n, bool_or(p.text ~ '^\\s|\\s$') as untrimmed from public.boards b join public.board_phrases p on p.board_id = b.id where b.id = any ($1::uuid[]) group by b.title",
+  [[6, 7, 8, 9, 10, 106, 107, 108, 109, 110].map((n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`)],
+);
+ok(tplCounts.length === 10 && tplCounts.every((r) => r.n === 24 && !r.untrimmed), 'nouveaux modèles : 24 phrases propres chacun');
+
+// modifier une phrase pendant la préparation
+await as(B);
+await q("select * from public.reopen_lobby($1)", [running.id]);
+await as(D);
+const [dPhrase] = await q("select * from public.add_lobby_phrase($1, 'Phrase avec faute')", [running.id]);
+const [dFixed] = await q("select * from public.edit_lobby_phrase($1, $2, 'Phrase corrigée')", [running.id, dPhrase.id]);
+ok(dFixed.text === "Phrase corrigée", "l'auteur corrige sa phrase");
+const [bOwn] = await q("select id from public.board_phrases where board_id = $1 and added_by is null limit 1", [draftSettingsId]);
+await expectError(q("select * from public.edit_lobby_phrase($1, $2, 'Piratée')", [running.id, bOwn.id]), /phrase_not_found/, "un invité ne modifie pas les phrases des autres");
+await as(B);
+const [hostEdit] = await q("select * from public.edit_lobby_phrase($1, $2, 'Reformulée par l''hôte')", [running.id, dPhrase.id]);
+ok(hostEdit.text === "Reformulée par l'hôte", "l'organisateur modifie une phrase proposée");
+await expectError(q("select * from public.edit_lobby_phrase($1, $2, 'a')", [running.id, dPhrase.id]), /phrase_exists/, "pas de doublon en modifiant");
+
+// --- Paliers : bingo, double bingo, carton plein ------------------------------------
+console.log("\nPaliers (règle progressive)");
+await as(B);
+const [{ id: stagesBoard }] = await q(
+  "select public.save_board(null, 'Paliers', '{}', 3, false, array['s1','s2','s3','s4','s5','s6','s7','s8','s9']) as id",
+);
+const [prog] = await q("select * from public.create_game($1, 'free', 'progressive')", [stagesBoard]);
+ok(prog.auto_end === "progressive", "partie avec la règle progressive");
+const [progB] = await q("select * from public.join_game($1, 'Bob')", [prog.code]);
+const setChecked = (indexes) =>
+  q("update public.game_players set checked = $1 where id = $2 returning *", [
+    JSON.stringify(progB.checked.map((_, i) => indexes.includes(i))),
+    progB.id,
+  ]);
+let [stage] = await setChecked([0, 1, 2]);
+ok(stage.has_bingo && stage.lines === 1 && stage.double_at === null, "1 ligne : BINGO");
+ok((await q("select status from public.games where id = $1", [prog.id]))[0].status === "playing", "… la partie continue");
+[stage] = await setChecked([0, 1, 2, 3, 4, 5]);
+ok(stage.lines === 2 && stage.double_at !== null && stage.full_at === null, "2 lignes : DOUBLE BINGO");
+ok((await q("select status from public.games where id = $1", [prog.id]))[0].status === "playing", "… la partie continue encore");
+[stage] = await setChecked([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+ok(stage.full_at !== null && stage.lines === 8, "grille complète : CARTON PLEIN (8 lignes)");
+ok((await q("select status from public.games where id = $1", [prog.id]))[0].status === "finished", "le carton plein termine la partie");
+ok((await q("select public.bb_count_lines('[true,false,false,true,true,false,true,false,true]'::jsonb, 3) as n"))[0].n === 2, "comptage : colonne + diagonale");
+
+// --- Réactions sur tout le classement -----------------------------------------------
+console.log("\nRéactions sur tout le classement");
+await as(D);
+for (const type of ["player", "join", "double", "full"]) {
+  await q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, $2, $3, '👏')", [auto.id, type, autoB.id]);
+}
+ok((await q("select * from public.game_reactions where game_id = $1 and user_id = $2 and target_type in ('player', 'join', 'double', 'full')", [auto.id, D])).length === 4, "réagir à un joueur, une arrivée, un double bingo, un carton plein");
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'event', $2, '🔥')", [auto.id, autoB.id]),
+  /row-level security/,
+  "une validation visée doit exister dans la partie",
+);
+await expectError(
+  q("insert into public.game_reactions (game_id, target_type, target_id, emoji) values ($1, 'nimporte', $2, '🔥')", [auto.id, autoB.id]),
+  /check constraint|row-level security/,
+  "types de cible limités",
+);
+await as(B);
+const [{ s: statsB }] = await q("select public.get_my_stats() as s");
+ok(statsB.reactions_received >= 4, "les réactions reçues comptent toutes");
+await as(D);
+await q("delete from public.game_reactions where game_id = $1 and user_id = $2 and target_type in ('player', 'join', 'double', 'full')", [auto.id, D]);
 
 // --- RGPD : export et suppression du compte ----------------------------------------
 console.log("\nRGPD");

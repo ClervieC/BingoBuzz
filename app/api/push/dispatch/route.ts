@@ -10,7 +10,7 @@ import { getSupabaseAdminClient, secretMatches } from "@/lib/supabase/admin";
  */
 
 type Payload = {
-  kind: "bingo" | "claim" | "claim_resolved" | "game_finished" | "game_started";
+  kind: "bingo" | "double_bingo" | "claim" | "claim_resolved" | "game_finished" | "game_started";
   game_id: string;
   player_id?: string;
   claim_id?: string;
@@ -60,10 +60,16 @@ export async function POST(request: Request) {
   let recipients: string[] = [];
   let message: Message | null = null;
   switch (payload.kind) {
-    case "bingo": {
+    case "bingo":
+    case "double_bingo": {
       const player = (players ?? []).find((p) => p.id === payload.player_id);
       recipients = members.filter((uid) => uid !== payload.actor_id);
-      message = { title: "push.msg.bingo.title", body: "push.msg.bingo.body", vars: { name: player?.nickname ?? "?", title } };
+      const double = payload.kind === "double_bingo";
+      message = {
+        title: double ? "push.msg.double.title" : "push.msg.bingo.title",
+        body: double ? "push.msg.double.body" : "push.msg.bingo.body",
+        vars: { name: player?.nickname ?? "?", title },
+      };
       break;
     }
     case "claim": {

@@ -569,3 +569,79 @@ a:active .logo-icon {
     transition-duration: 1ms !important;
   }
 }
+
+/* ------------------------------------------------------------------------ */
+/* Styles de carte (theme.style) : data-card sur un ancêtre de la grille.   */
+/* Hors @layer : ces règles l'emportent sur les utilitaires Tailwind.       */
+/* ------------------------------------------------------------------------ */
+
+/* Papier : carton crème, pointillés, typo à empattements */
+[data-card="paper"] .bingo-cell {
+  background-color: #fdf8ec;
+  border: 1.5px dashed #c9b88f;
+  border-radius: 6px;
+  color: #3b2f1e;
+  font-family: Georgia, "Times New Roman", serif;
+  box-shadow: none;
+}
+[data-card="paper"] .bingo-cell[data-state="checked"] {
+  background-color: #f3e3bf;
+}
+[data-card="paper"] .bingo-cell[data-state="free"] {
+  background-color: var(--accent);
+  border-style: solid;
+  border-color: transparent;
+  color: var(--accent-fg);
+}
+[data-card="paper"] .bingo-board {
+  background: #efe4c8;
+  padding: 6px;
+  border-radius: 10px;
+}
+
+/* Néon : fond nuit, bords lumineux */
+[data-card="neon"] .bingo-board {
+  background: #0d0b1a;
+  padding: 6px;
+  border-radius: 16px;
+}
+[data-card="neon"] .bingo-cell {
+  background-color: #14112a;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: #f5f3ff;
+  box-shadow: inset 0 0 8px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+[data-card="neon"] .bingo-cell[data-state="checked"] {
+  background-color: color-mix(in srgb, var(--accent) 28%, #14112a);
+  border-color: var(--accent);
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--accent) 70%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
+  text-shadow: 0 0 6px var(--accent);
+}
+[data-card="neon"] .bingo-cell[data-state="free"] {
+  background-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent);
+  color: #fff;
+}
+[data-card="neon"] .bingo-stamp {
+  border-color: color-mix(in srgb, var(--accent) 80%, white);
+  background: transparent;
+}
+
+/* Minimal : aplats, sans bord ni tampon */
+[data-card="minimal"] .bingo-cell {
+  background-color: var(--surface-2);
+  border-color: transparent;
+  border-radius: 4px;
+  box-shadow: none;
+  font-weight: 500;
+}
+[data-card="minimal"] .bingo-cell[data-state="checked"],
+[data-card="minimal"] .bingo-cell[data-state="free"] {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+[data-card="minimal"] .bingo-stamp {
+  display: none;
+}

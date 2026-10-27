@@ -17,8 +17,16 @@ Le bingo des phrases qu'on entend partout. Les cases contiennent des phrases ou 
   Classement en direct, « Plus qu'une case ! », alerte BINGO avec la grille du gagnant à vérifier, et resynchronisation au retour sur l'onglet.
 - **Brouillon et préparation à plusieurs** : un bingo peut être enregistré incomplet. L’hôte ouvre une partie « en préparation » (même code et même lien) : les invités la rejoignent et ajoutent des phrases (chacun retire les siennes, l’hôte toutes), puis l’hôte lance la partie et chacun reçoit sa grille.
 - **Paramètres de la partie** (hôte) : mode (avant le lancement), règle de fin et durée modifiables, remise à zéro (option : nouvelles grilles), retour en préparation.
+- **Récap de fin de partie** : podium, bingo le plus rapide, phrase culte, photo de la partie, exportable en image pour les stories ; boutons « Rejouer avec les mêmes » et « Nouvelle manche à préparer ».
+- **Onglet Fil** : le fil de la partie (arrivées, phrases vues ou validées, bingos, double bingo, carton plein, avec les réactions), les photos de preuve s’affichent directement dans le moment correspondant.
+- **Avatars** : un emoji choisi en rejoignant (mémorisé), une couleur par joueur.
+- **Profil et badges** (`/profile`) : statistiques et 13 badges.
+- **Styles de carte** : classique, papier, néon, minimal (`theme.style`, choisi dans l’éditeur).
+- **Modèles par catégorie** (travail, fête, famille, sport, télé, voyage) : 10 en français, 10 en anglais.
+- **Accueil déconnecté** : sous le formulaire, une démo animée et « comment ça marche » ; un lien d’invitation montre une grille floutée avant la connexion.
+- **Paliers** (règle par défaut) : 1 ligne = BINGO, 2 lignes = DOUBLE BINGO, grille complète = CARTON PLEIN, qui termine la partie. Classement, alertes, fil et notifications suivent les paliers.
 - **Fin de partie** : à la main, automatiquement au 1er bingo ou au carton plein, ou après 1, 3 ou 7 jours (choisi au lancement).
-- **Réactions** 😂🔥👏😮❤️ sur les bingos (classement) et les propositions / photos, en temps réel.
+- **Réactions** 😂🔥👏😮❤️ sur tout l’onglet Classement (chaque joueur, chaque moment du fil) et sur les propositions / photos, en temps réel, avec la liste de qui a réagi.
 - **Notifications push** (facultatives, voir Déploiement § 5) : bingo d'un joueur, proposition à confirmer, sa proposition confirmée ou contestée, fin de partie.
 - **Historique** : les parties terminées (gagnants, son score) dans la bibliothèque, avec accès au classement final et aux photos.
 - **Bibliothèque** : mes bingos (modifier, dupliquer, supprimer), parties terminées et 5 modèles fournis dans la langue de l'interface.
@@ -105,7 +113,7 @@ Sans la CLI, on peut aussi exécuter les fichiers de `supabase/migrations/` un p
 
 Les migrations créent les tables, les fonctions, les policies RLS et la publication Realtime, puis insèrent les modèles (5 en français, 5 en anglais, affichés selon la langue de l'interface).
 
-**Projet déjà en production ?** `npx supabase db push` n'applique que les migrations manquantes. Dans SQL Editor, exécuter dans l'ordre celles qui n'ont pas encore été passées (de `…0007_account.sql` à `…0015_lobby.sql` si vous étiez resté à la v1). La `…0014_lobby_enum.sql` doit être exécutée **seule, avant** la `…0015`. La `…0015` peut être relancée sans risque.
+**Projet déjà en production ?** `npx supabase db push` n'applique que les migrations manquantes. Dans SQL Editor, exécuter dans l'ordre celles qui n'ont pas encore été passées (de `…0007_account.sql` à `…0019_reactions_everywhere.sql` si vous étiez resté à la v1). Les fichiers `…_enum.sql` (`…0014_lobby_enum`, `…0017_progressive_enum`) doivent être exécutés **seuls, avant** le fichier qui les suit. Les `…0015` et `…0016` peuvent être relancées sans risque, mais toujours dans l’ordre (relancer la 0015 après la 0016 remettrait l’ancienne version de `join_game` : relancez alors aussi la 0016).
 
 ### 3. Configurer l'authentification
 

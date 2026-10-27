@@ -7,6 +7,7 @@ import { BottomSheet } from "./BottomSheet";
 import type { GameClaim, GamePlayer } from "@/types/bingo";
 import { useT } from "./I18nProvider";
 import { Icon } from "./Icon";
+import { PlayerAvatar } from "./PlayerAvatar";
 
 /**
  * Mode « validé par le groupe » : propositions des autres à confirmer ou
@@ -59,6 +60,11 @@ export function ClaimsPanel({
             {toConfirm.map((claim) => (
               <li key={claim.id} className="animate-rise card border-accent/40 p-3 shadow-md shadow-violet-900/10">
                 <div className="flex items-start gap-3">
+                  <PlayerAvatar
+                    userId={claim.claimed_by}
+                    avatar={players.find((p) => p.user_id === claim.claimed_by)?.avatar}
+                    size={36}
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-muted">{t("game.peer.saw", { name: nameOf(claim.claimed_by) })}</p>
                     <p className="mt-0.5 font-extrabold">« {frenchSpacing(phraseText(claim.phrase_id))} »</p>

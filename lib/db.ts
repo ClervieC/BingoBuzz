@@ -7,7 +7,7 @@ import type { Database } from "@/types/database";
 type Client = SupabaseClient<Database>;
 
 const BOARD_COLUMNS =
-  "id, owner_id, title, theme, grid_size, free_center, is_template, created_at, updated_at";
+  "id, owner_id, title, theme, grid_size, free_center, is_template, created_at, updated_at, category";
 
 function toBoard(row: Database["public"]["Tables"]["boards"]["Row"]): Board {
   return { ...row, theme: normalizeTheme(row.theme) };

@@ -45,7 +45,7 @@ export function SoloClient({ board }: { board: BoardWithPhrases }) {
   }, [gridChanged, dismissGridChanged, toast, t]);
 
   return (
-    <div className="themed min-h-dvh" style={themeStyle(board.theme)}>
+    <div className="themed min-h-dvh" style={themeStyle(board.theme)} data-card={board.theme.style}>
       <AppHeader back={`/boards/${board.id}`} backLabel={t("common.back")} />
 
       <main className="page pb-safe stagger space-y-4 pt-2 pb-10">

@@ -9,7 +9,7 @@ import { Icon } from "./Icon";
  * ou « keep » (partie en cours : garder l'échéance déjà fixée).
  */
 export type EndRule = GameAutoEnd | "1d" | "3d" | "7d" | "keep";
-const END_RULES: EndRule[] = ["manual", "first_bingo", "full_card", "1d", "3d", "7d"];
+const END_RULES: EndRule[] = ["progressive", "manual", "first_bingo", "full_card", "1d", "3d", "7d"];
 const MODES: GameMode[] = ["free", "peer", "validated"];
 
 export function isDuration(rule: EndRule): rule is "1d" | "3d" | "7d" {

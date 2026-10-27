@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { BoardTheme, ThemeColor } from "@/types/bingo";
+import { CARD_STYLES, type BoardTheme, type CardStyle, type ThemeColor } from "@/types/bingo";
 
 interface Palette {
   /** couleur d'accent en mode clair / sombre */
@@ -33,7 +33,9 @@ export const DEFAULT_THEME: BoardTheme = { emoji: "🎉", color: "violet" };
 export function normalizeTheme(theme: Partial<BoardTheme> | null | undefined): BoardTheme {
   const color = theme?.color && theme.color in THEME_COLORS ? theme.color : DEFAULT_THEME.color;
   const emoji = typeof theme?.emoji === "string" && theme.emoji.length > 0 ? theme.emoji : DEFAULT_THEME.emoji;
-  return { emoji, color };
+  const style: CardStyle =
+    theme?.style && (CARD_STYLES as readonly string[]).includes(theme.style) ? theme.style : "classic";
+  return { emoji, color, style };
 }
 
 /**

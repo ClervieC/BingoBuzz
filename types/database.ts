@@ -15,6 +15,8 @@ import type {
   GameReaction,
   GameStatus,
   GridSize,
+  PlayerStats,
+  TemplateCategory,
 } from "./bingo";
 
 type BoardRow = {
@@ -28,6 +30,7 @@ type BoardRow = {
   created_at: string;
   updated_at: string;
   locale?: "fr" | "en";
+  category?: TemplateCategory | null;
 };
 
 type BoardPhraseRow = {
@@ -64,6 +67,10 @@ type GamePlayerRow = {
   has_bingo: boolean;
   bingo_at: string | null;
   joined_at: string;
+  avatar?: string | null;
+  lines?: number;
+  double_at?: string | null;
+  full_at?: string | null;
 };
 
 type GameEventRow = {
@@ -230,6 +237,14 @@ export type Database = {
         Args: { p_game_id: string; p_new_grids?: boolean };
         Returns: GameRow;
       };
+      edit_lobby_phrase: {
+        Args: { p_game_id: string; p_phrase_id: string; p_text: string };
+        Returns: BoardPhraseRow;
+      };
+      get_my_stats: {
+        Args: Record<string, never>;
+        Returns: PlayerStats;
+      };
       reopen_lobby: {
         Args: { p_game_id: string };
         Returns: GameRow;
@@ -243,7 +258,7 @@ export type Database = {
         Returns: undefined;
       };
       join_game: {
-        Args: { p_code: string; p_nickname: string };
+        Args: { p_code: string; p_nickname: string; p_avatar?: string | null };
         Returns: GamePlayerRow;
       };
       claim_phrase: {

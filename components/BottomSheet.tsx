@@ -83,7 +83,7 @@ export function BottomSheet({
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         tabIndex={-1}
-        className="animate-slide-up pb-safe relative max-h-[85dvh] w-full overflow-y-auto rounded-t-3xl bg-surface shadow-2xl outline-none sm:max-w-lg sm:rounded-3xl"
+        className="animate-slide-up pb-safe relative max-h-[85dvh] w-full overflow-x-hidden overflow-y-auto rounded-t-3xl bg-surface shadow-2xl outline-none sm:max-w-lg sm:rounded-3xl"
         onTouchStart={(e) => {
           dragStart.current = panelRef.current?.scrollTop === 0 ? e.touches[0].clientY : null;
         }}

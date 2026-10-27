@@ -22,6 +22,7 @@ export function writeJson(key: string, value: unknown): void {
 export const storageKeys = {
   solo: (boardId: string) => `bingobuzz:solo:${boardId}`,
   nickname: "bingobuzz:nickname",
+  avatar: "bingobuzz:avatar",
   celebrated: (gameId: string) => `bingobuzz:celebrated:${gameId}`,
   pushDismissed: "bingobuzz:push-dismissed",
 };

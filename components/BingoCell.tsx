@@ -59,6 +59,7 @@ export const BingoCell = memo(function BingoCell({
       type="button"
       {...handlers}
       aria-pressed={cell.free ? undefined : checked}
+      data-state={cell.free ? "free" : checked ? "checked" : pending ? "pending" : "idle"}
       aria-label={`${label}, ${state}`}
       aria-disabled={readOnly || cell.free ? true : undefined}
       className={[
@@ -79,7 +80,7 @@ export const BingoCell = memo(function BingoCell({
       {checked && !cell.free && (
         <span
           aria-hidden
-          className={`pointer-events-none absolute inset-0 m-auto aspect-square w-[78%] rounded-full border-[3px] border-accent/45 bg-accent/10 ${justChanged ? "animate-stamp" : "-rotate-6"}`}
+          className={`bingo-stamp pointer-events-none absolute inset-0 m-auto aspect-square w-[78%] rounded-full border-[3px] border-accent/45 bg-accent/10 ${justChanged ? "animate-stamp" : "-rotate-6"}`}
         />
       )}
       {pending && !checked && (

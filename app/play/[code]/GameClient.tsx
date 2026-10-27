@@ -9,17 +9,19 @@ import { HostPanel } from "@/components/HostPanel";
 import { useI18n, useT } from "@/components/I18nProvider";
 import { Icon, type IconName } from "@/components/Icon";
 import { JoinForm } from "@/components/JoinForm";
-import { ProofGallery } from "@/components/ProofGallery";
 import { ProgressRing } from "@/components/ProgressRing";
 import { ProposeSheet } from "@/components/ProposeSheet";
 import { PushPrompt } from "@/components/PushPrompt";
 import { ReactionBar } from "@/components/ReactionBar";
 import { Leaderboard, rankPlayers } from "@/components/Leaderboard";
 import { GameSettingsSheet } from "@/components/GameSettingsSheet";
+import { GameRecap } from "@/components/GameRecap";
+import { GridTeaser } from "@/components/GridTeaser";
 import { LobbyView } from "@/components/LobbyView";
+import { MomentsFeed } from "@/components/MomentsFeed";
 import { SharePanel } from "@/components/SharePanel";
 import { useToast } from "@/components/Toast";
-import { VictoryOverlay, victoryKindFromLine, type VictoryKind } from "@/components/Victory";
+import { VictoryOverlay, victoryKindFromLine, victoryStage, type VictoryKind } from "@/components/Victory";
 import { useGame } from "@/hooks/useGame";
 import { cellsToBingo, countChecked, detectBingo, sizeFromLength } from "@/lib/bingo";
 import { fireConfetti } from "@/lib/confetti";
@@ -27,7 +29,7 @@ import { haptics } from "@/lib/haptics";
 import type { MessageKey } from "@/lib/i18n";
 import { readJson, storageKeys, writeJson } from "@/lib/storage";
 import { THEME_COLORS, themeStyle } from "@/lib/themes";
-import type { GameClaim, GameMode, GamePlayer, PublicGame } from "@/types/bingo";
+import type { GameClaim, GameMode, GamePlayer, GameReaction, PublicGame } from "@/types/bingo";
 
 /** « dans 3 jours », « in 5 hours »… */
 function relativeTime(iso: string, locale: string) {
@@ -38,13 +40,13 @@ function relativeTime(iso: string, locale: string) {
   return rtf.format(Math.round(seconds / 86400), "day");
 }
 
-type Tab = "grid" | "ranking" | "photos" | "host" | "invite";
+type Tab = "grid" | "ranking" | "feed" | "host" | "invite";
 
 const TAB_META: Record<Tab, { icon: IconName; label: MessageKey }> = {
   grid: { icon: "grid", label: "game.tabs.grid" },
   ranking: { icon: "trophy", label: "game.tabs.ranking" },
   host: { icon: "settings", label: "game.tabs.host" },
-  photos: { icon: "image", label: "game.tabs.photos" },
+  feed: { icon: "feed", label: "game.tabs.feed" },
   invite: { icon: "share", label: "game.tabs.invite" },
 };
 
@@ -83,7 +85,8 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     if (g.me) list.push("grid");
     list.push("ranking");
     // galerie des preuves : seulement en mode « validé par le groupe »
-    if ((g.game?.mode ?? publicGame.mode) === "peer") list.push("photos");
+    // fil de la partie (avec les photos de preuve)
+    list.push("feed");
     if (g.isHost) list.push("host");
     list.push("invite");
     return list;
@@ -111,7 +114,8 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     if (!notice) return;
     haptics.alert();
     void fireConfetti("small");
-    toast.show(t("game.bingoAlert", { name: notice.player.nickname }), {
+    const key = notice.stage === 3 ? "game.fullAlert" : notice.stage === 2 ? "game.doubleAlert" : "game.bingoAlert";
+    toast.show(t(key, { name: notice.player.nickname }), {
       tone: "bingo",
       duration: 8000,
       action: { label: t("game.bingoAlert.view"), onClick: () => setViewedId(notice.player.id) },
@@ -139,20 +143,28 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
   }, [claimNotice]);
 
   // ---- ma victoire (aussi en modes validés, quand d'autres cochent pour moi) --
+  // Trois célébrations par partie : 1 ligne, 2 lignes, grille complète. Le palier
+  // fêté est mémorisé : décocher puis recocher ne relance pas la fête.
   const myChecked = g.me?.checked;
-  const myGridLength = g.me?.grid.length;
+  const myGridLength = g.me?.grid?.length;
   const gameId = g.game?.id;
   useEffect(() => {
     if (!myChecked || !myGridLength || !gameId) return;
     const result = detectBingo(myChecked, sizeFromLength(myGridLength));
     const key = storageKeys.celebrated(gameId);
-    const stored = readJson<{ lines: number; full: boolean }>(key) ?? { lines: 0, full: false };
-    if (result.isFullCard && !stored.full) {
-      setVictory("full");
-    } else if (result.lines.length > stored.lines) {
-      setVictory(victoryKindFromLine(result.lines[result.lines.length - 1].kind));
+    const stage = victoryStage(result.lines.length, result.isFullCard);
+    // ancien format { lines, full } : converti en palier pour ne pas refêter
+    const stored = readJson<{ stage?: number; lines?: number; full?: boolean }>(key);
+    const celebrated = stored?.stage ?? victoryStage(stored?.lines ?? 0, stored?.full ?? false);
+    if (stage > celebrated) {
+      setVictory(
+        stage === 3 ? "full" : stage === 2 ? "double" : victoryKindFromLine(result.lines[result.lines.length - 1].kind),
+      );
+      writeJson(key, { stage });
+    } else if (stage === 0 && countChecked(myChecked) <= myChecked.filter((_, i) => g.me?.grid[i]?.free).length) {
+      // grille remise à zéro par l'hôte : les paliers peuvent être fêtés à nouveau
+      writeJson(key, { stage: 0 });
     }
-    writeJson(key, { lines: result.lines.length, full: result.isFullCard });
   }, [myChecked, myGridLength, gameId]);
 
   const viewed: GamePlayer | null = viewedId ? (g.players.find((p) => p.id === viewedId) ?? null) : null;
@@ -192,19 +204,23 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     [mode, toggle, me, g.claims, g.userId, cancelClaim],
   );
 
-  const { reactions, toggleReaction, userId } = g;
-  const claimReactions = useCallback(
-    (claim: GameClaim) => (
+  const { reactions, toggleReaction, userId, players } = g;
+  /** Barre de réactions pour n'importe quelle cible (joueur, moment, proposition…). */
+  const reactionsFor = useCallback(
+    (targetType: GameReaction["target_type"], targetId: string, className?: string) => (
       <ReactionBar
+        className={className}
         reactions={reactions}
-        targetType="claim"
-        targetId={claim.id}
+        targetType={targetType}
+        targetId={targetId}
         userId={userId}
-        onToggle={(emoji) => void toggleReaction("claim", claim.id, emoji)}
+        players={players}
+        onToggle={(emoji) => void toggleReaction(targetType, targetId, emoji)}
       />
     ),
-    [reactions, toggleReaction, userId],
+    [reactions, toggleReaction, userId, players],
   );
+  const claimReactions = useCallback((claim: GameClaim) => reactionsFor("claim", claim.id), [reactionsFor]);
 
   // ------------------------------------------------------------------------
 
@@ -309,7 +325,8 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
               <p className="text-center font-semibold text-muted">{t("game.finished")}</p>
             ) : !g.userId ? (
               // connexion obligatoire : retour automatique sur cette partie ensuite
-              <div className="space-y-3 text-center">
+              <div className="space-y-4 text-center">
+                {publicGame.status === "playing" && <GridTeaser size={publicGame.grid_size} />}
                 <p className="text-muted">{t("game.join.loginRequired")}</p>
                 <a href={`/?next=${encodeURIComponent(`/play/${publicGame.code}`)}`} className="btn btn-primary w-full">
                   <Icon name="user" size={20} />
@@ -362,6 +379,7 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
             isMember={Boolean(g.me)}
             onAdd={g.addPhrase}
             onRemove={(id) => void g.removePhrase(id)}
+            onEdit={g.editPhrase}
             onStart={g.startGame}
             onCancel={() =>
               void g.cancelLobby().then((ok) => {
@@ -404,8 +422,13 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
     ? t("game.status.finished")
     : myResult?.isFullCard
       ? t("game.status.full")
-      : myResult?.hasBingo
-        ? t("game.status.bingo")
+      : myResult?.hasBingo && g.game?.auto_end === "progressive"
+        ? // règle progressive : on annonce le palier suivant
+          myResult.lines.length >= 2
+          ? t("game.status.toFull", { count: (me?.grid.length ?? 0) - checkedCount })
+          : t("game.status.toDouble")
+        : myResult?.hasBingo
+          ? t("game.status.bingo")
         : missing === 1
           ? t("game.status.one")
           : checkedCount <= (me?.grid.some((c) => c.free) ? 1 : 0)
@@ -413,7 +436,7 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
             : t("game.status.missing", { count: missing });
 
   return (
-    <div className="themed min-h-dvh" style={themeStyle(theme)}>
+    <div className="themed min-h-dvh" style={themeStyle(theme)} data-card={theme.style}>
       {header}
 
       {g.connection !== "live" && g.connection !== "connecting" && (
@@ -435,7 +458,8 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
         {/* le bandeau (nom, mode, code) n'apparaît pas sur la grille : place au jeu */}
         {activeTab !== "grid" && banner}
 
-        {finished && (
+        {/* partie terminée : le récap complet est dans le classement */}
+        {finished && activeTab !== "ranking" && (
           <section className="animate-bounce-in card border-gold bg-gold/10 p-4 text-center">
             <p className="text-lg font-black">🏁 {t("game.ended.title")}</p>
             <p className="mt-1 text-muted">
@@ -443,6 +467,9 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
                 ? t("game.ended.winner", { name: winners.map((w) => w.player.nickname).join(", ") })
                 : t("game.ended.noWinner")}
             </p>
+            <button type="button" className="btn btn-primary btn-sm mt-3" onClick={() => setTab("ranking")}>
+              {t("recap.open")}
+            </button>
           </section>
         )}
 
@@ -499,6 +526,40 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
           </>
         )}
 
+        {activeTab === "ranking" && finished && g.game && (
+          <GameRecap
+            title={title}
+            theme={theme}
+            game={g.game}
+            players={g.players}
+            claims={g.claims}
+            reactions={reactions}
+            phraseText={phraseText}
+            actions={
+              g.isHost ? (
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-primary w-full"
+                    onClick={() => {
+                      if (window.confirm(t("replay.confirm"))) void g.resetGame(true).then((ok) => ok && setTab("grid"));
+                    }}
+                  >
+                    🔄 {t("replay.now")}
+                  </button>
+                  {g.board?.owner_id === g.userId && (
+                    <button type="button" className="btn btn-ghost w-full" onClick={() => void g.reopenLobby()}>
+                      ✍️ {t("replay.prepare")}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="text-center text-sm text-muted">{t("replay.waiting")}</p>
+              )
+            }
+          />
+        )}
+
         {activeTab === "ranking" && (
           <section>
             <h2 className="mb-3 text-lg font-extrabold">{t("game.tabs.ranking")}</h2>
@@ -508,21 +569,10 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
               hostId={g.game?.host_id ?? null}
               online={g.online}
               onSelect={(p) => setViewedId(p.id)}
-              renderExtra={(player, bingo) =>
-                bingo ? (
-                  <ReactionBar
-                    className="mt-1.5 pl-3"
-                    reactions={reactions}
-                    targetType="bingo"
-                    targetId={player.id}
-                    userId={userId}
-                    onToggle={(emoji) => void toggleReaction("bingo", player.id, emoji)}
-                  />
-                ) : null
-              }
             />
           </section>
         )}
+
 
         {activeTab === "host" && g.game && (
           <>
@@ -582,12 +632,13 @@ export function GameClient({ publicGame }: { publicGame: PublicGame }) {
           </>
         )}
 
-        {activeTab === "photos" && (
-          <ProofGallery
-            claims={g.claims}
+        {activeTab === "feed" && (
+          <MomentsFeed
             players={g.players}
+            claims={g.claims}
+            events={g.events}
             phraseText={phraseText}
-            renderReactions={claimReactions}
+            renderReactions={reactionsFor}
           />
         )}
 
